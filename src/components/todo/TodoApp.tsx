@@ -35,11 +35,45 @@ interface TodoAppProps {
   databaseUrl: string | null;
 }
 
-// Days read this session, keyed by date. A day you've seen renders from here
-// at once; it's only re-read from Notion when its copy is older than the TTL
-// (the Refresh button bypasses that).
+// Days read before, keyed by date. A day you've seen renders from here at once;
+// it's only re-read from Notion when its copy is older than the TTL (the
+// Refresh button and a page load bypass that). Kept in localStorage, so a
+// reload shows the last known list straight away while the fresh read runs.
 const CACHE_TTL_MS = 30_000;
-const dayCache = new Map<string, { tasks: TodoTask[]; at: number }>();
+const CACHE_STORAGE_KEY = "tasks:dayCache:v1";
+// Only the most recently read days are kept, so storage doesn't grow forever
+const CACHE_MAX_DAYS = 60;
+
+type CachedDay = { tasks: TodoTask[]; at: number };
+
+function restoreCache(): Map<string, CachedDay> {
+  try {
+    const raw = localStorage.getItem(CACHE_STORAGE_KEY);
+    const entries = raw ? (JSON.parse(raw) as [string, CachedDay][]) : [];
+    return new Map(Array.isArray(entries) ? entries : []);
+  } catch {
+    return new Map();
+  }
+}
+
+const dayCache = restoreCache();
+
+function persistCache(): void {
+  try {
+    const entries = [...dayCache]
+      .sort((a, b) => b[1].at - a[1].at)
+      .slice(0, CACHE_MAX_DAYS)
+      // A row still waiting on its create isn't in Notion yet; after a reload
+      // it would never get its page id
+      .map(([day, { tasks, at }]): [string, CachedDay] => [
+        day,
+        { tasks: tasks.filter((t) => !t.id.startsWith(TEMP_PREFIX)), at },
+      ]);
+    localStorage.setItem(CACHE_STORAGE_KEY, JSON.stringify(entries));
+  } catch {
+    // Full or blocked storage just means no instant list next time
+  }
+}
 
 // Created on screen, not yet in Notion — the row needs a key before the page id
 // comes back.
@@ -61,10 +95,13 @@ export default function TodoApp({ databaseUrl }: TodoAppProps) {
   const [slide, setSlide] = useState<"next" | "prev" | null>(null);
   // The month grid replaces the whole list page while it's open
   const [view, setView] = useState<"list" | "calendar">("list");
-  const [tasks, setTasks] = useState<TodoTask[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  // Whatever was cached for today shows at once; the fresh read replaces it
+  const [tasks, setTasks] = useState<TodoTask[]>(() => dayCache.get(todayKey())?.tasks ?? []);
+  const [loaded, setLoaded] = useState(() => dayCache.has(todayKey()));
   // Requests still on their way to Notion; drives the sync pill
   const [inFlight, setInFlight] = useState(0);
+  // Reads under way, so a background refresh of a cached list shows as syncing
+  const [reading, setReading] = useState(0);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -102,7 +139,9 @@ export default function TodoApp({ databaseUrl }: TodoAppProps) {
   const loadDay = useCallback(async (targetDate: string, manual = false) => {
     if (manual) setRefreshing(true);
     const epoch = writeEpoch.current;
+    setReading((n) => n + 1);
     const res = await api.list(targetDate);
+    setReading((n) => n - 1);
     if (manual) setRefreshing(false);
     if (dateRef.current !== targetDate) return; // navigated away meanwhile
     if (epoch !== writeEpoch.current || inFlightRef.current > 0) {
@@ -113,6 +152,7 @@ export default function TodoApp({ databaseUrl }: TodoAppProps) {
     if (res.ok) {
       setTasks(res.tasks);
       dayCache.set(targetDate, { tasks: res.tasks, at: Date.now() });
+      persistCache();
       // Anything just carried over from an earlier day grows in, so a list
       // that gained tasks on its own explains itself.
       if (res.carried.length) setEnteringIds(res.carried);
@@ -131,15 +171,27 @@ export default function TodoApp({ databaseUrl }: TodoAppProps) {
     [loadDay],
   );
 
+  // A page load always asks Notion, however fresh the stored copy looks — the
+  // cache is there to show something while that read runs, not to skip it.
+  // Day changes after that only re-read a stale day.
+  const firstLoad = useRef(true);
   useEffect(() => {
-    loadIfStale(date);
-  }, [date, loadIfStale]);
+    if (firstLoad.current) {
+      firstLoad.current = false;
+      void loadDay(date);
+    } else {
+      loadIfStale(date);
+    }
+  }, [date, loadDay, loadIfStale]);
 
   // Local edits keep the cached copy current, so coming back to a day shows
   // them — without resetting its age, which only a real read does.
   useEffect(() => {
     const cached = dayCache.get(dateRef.current);
-    if (cached) cached.tasks = tasks;
+    if (cached && cached.tasks !== tasks) {
+      cached.tasks = tasks;
+      persistCache();
+    }
   }, [tasks]);
 
   // A phone tab sits in the background for hours; coming back to it should
@@ -480,11 +532,18 @@ export default function TodoApp({ databaseUrl }: TodoAppProps) {
     textDecoration: "none",
   } as const;
 
+  const syncing = inFlight > 0 || reading > 0;
   const syncPill = (
     <button
       onClick={() => void loadDay(date, true)}
-      title={inFlight > 0 ? "Saving to Notion" : "Saved to Notion — tap to refresh"}
-      className={`rounded-full cursor-pointer ${inFlight > 0 ? "todo-pill-syncing" : ""}`}
+      title={
+        inFlight > 0
+          ? "Saving to Notion"
+          : reading > 0
+            ? "Checking Notion for changes"
+            : "Saved to Notion — tap to refresh"
+      }
+      className={`rounded-full cursor-pointer ${syncing ? "todo-pill-syncing" : ""}`}
       style={{
         padding: "var(--space-3xs) var(--space-xs)",
         fontSize: "var(--text-2xs)",
@@ -494,7 +553,7 @@ export default function TodoApp({ databaseUrl }: TodoAppProps) {
         border: `1px solid color-mix(in srgb, var(--border) 70%, transparent)`,
       }}
     >
-      {inFlight > 0 ? "Syncing" : "Synced"}
+      {syncing ? "Syncing" : "Synced"}
     </button>
   );
 

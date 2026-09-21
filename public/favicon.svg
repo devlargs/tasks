@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Checklist: the Todo service icon -->
+  <rect x="10" y="7" width="44" height="50" rx="7" fill="#f2f2f7"/>
+  <rect x="22" y="3" width="20" height="9" rx="4.5" fill="#9ca0b0"/>
+  <path d="M17 22.5l3.6 3.6L27 19.5" stroke="#40a02b" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <rect x="31" y="21" width="16" height="3.4" rx="1.7" fill="#9ca0b0"/>
+  <path d="M17 35.5l3.6 3.6L27 32.5" stroke="#40a02b" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <rect x="31" y="34" width="16" height="3.4" rx="1.7" fill="#9ca0b0"/>
+  <rect x="16.5" y="45" width="8" height="8" rx="2.5" fill="none" stroke="#4c4f69" stroke-width="3"/>
+  <rect x="31" y="47" width="16" height="3.4" rx="1.7" fill="#4c4f69"/>
+</svg>

@@ -1,0 +1,764 @@
+/* Hallmark · genre: modern-minimal · macrostructure: Workbench
+ * theme: preserved (Catppuccin Mocha/Latte — pre-flight lock)
+ * type: system sans + system mono · enrichment: none (typography only)
+ * motion: tick-draw · letter-dissolve · FLIP/collapse  (3 primitives, no dependency)
+ * pre-emit critique: P5 H5 E5 S4 R5 V4
+ *
+ * Every colour below derives from the app's existing custom properties via
+ * color-mix(), never a literal — that's what keeps the light theme working.
+ * Surface hierarchy is carried by lightness and rule weight, not by giving
+ * every element the same 1px border.
+ *
+ * The page is a two-band workbench: a pinned head (day, composer, progress)
+ * and a scrolling list under it. The composer sits in the head on purpose —
+ * a composer at the foot of the list is unreachable the moment the list is
+ * longer than the pane.
+ */
+
+/* --- Bands --------------------------------------------------------------- */
+
+.todo-page {
+  font-family: var(--font-ui);
+  /* Everything below sizes against the pane, not the viewport — the sidebar
+     takes 68px, so the pane is always narrower than the window. */
+  container-type: inline-size;
+  container-name: todo;
+  /* The list must be the only thing that scrolls */
+  min-height: 0;
+  /* One character's fade in the letter-dissolve. Must stay in step with
+     CHAR_MS in dissolve.ts, which is what the toggle waits on before it
+     collapses the row. */
+  --todo-dissolve-ms: 300ms;
+}
+
+.todo-measure {
+  max-width: 620px;
+  margin: 0 auto;
+}
+
+.todo-head {
+  /* Optical: the day masthead reads better with more air above than below */
+  padding: var(--space-xl) var(--space-lg) 0;
+}
+
+.todo-scroll {
+  padding: var(--space-md) var(--space-lg) var(--space-2xl);
+  min-height: 0;
+}
+
+/* --- Figures ------------------------------------------------------------- */
+
+/* Mono is the outlier face and carries exactly one role: numbers. */
+.todo-figure {
+  font-family: var(--font-figure);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* --- Day masthead -------------------------------------------------------- */
+
+.todo-day {
+  font-size: var(--text-display-s);
+  font-weight: 200;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  /* Long weekday names shouldn't push the controls off the row */
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.todo-daynav {
+  color: var(--text-muted);
+  transition: color var(--dur-micro) var(--ease-out);
+}
+
+.todo-daynav:hover,
+.todo-daynav:focus-visible {
+  color: var(--text-primary);
+}
+
+/* --- Composer ------------------------------------------------------------ */
+
+/* The one raised surface on the page. Elevation by lightness, not shadow —
+   a drop shadow on a dark panel is just a glow. */
+.todo-composer {
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-sm);
+  margin-bottom: var(--space-md);
+  background: color-mix(in srgb, var(--panel) 70%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  transition: border-color var(--dur-short) var(--ease-out);
+}
+
+.todo-composer:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+/* The Enter hint is only true once there is something to submit. */
+.todo-composer-hint {
+  opacity: 0;
+  transition: opacity var(--dur-micro) var(--ease-out);
+}
+
+.todo-composer-hint[aria-hidden="false"] {
+  opacity: 1;
+}
+
+/* --- Progress: the head's bottom edge ------------------------------------ */
+
+.todo-progress-track {
+  height: 2px;
+  background: color-mix(in srgb, var(--border) 55%, transparent);
+}
+
+.todo-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width var(--dur-long) var(--ease-out);
+}
+
+.todo-progress-fill-complete {
+  background: var(--success);
+}
+
+/* --- Task rows ----------------------------------------------------------- */
+
+/* No per-row border, no per-row card. Rows are separated by a hairline and
+   distinguished on hover by a tint — that's the whole treatment. */
+.todo-row {
+  position: relative;
+  transition:
+    background-color var(--dur-micro) var(--ease-out),
+    opacity var(--dur-short) var(--ease-out);
+}
+
+/* Each row is wrapped for its ref and its enter animation, so the hairline
+   has to hang off the wrapper — .todo-row elements are never siblings. */
+.todo-row-wrap + .todo-row-wrap > .todo-row {
+  border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+}
+
+.todo-row:hover,
+.todo-row:focus-within {
+  background: color-mix(in srgb, var(--sidebar-hover) 45%, transparent);
+}
+
+.todo-row-done {
+  opacity: 0.5;
+}
+
+/* Row affordances: hidden until the row is hovered OR holds keyboard focus.
+   The :focus-within half is what makes them reachable without a mouse. */
+.todo-row-action {
+  opacity: 0;
+  transition:
+    opacity var(--dur-micro) var(--ease-out),
+    color var(--dur-micro) var(--ease-out);
+}
+
+.todo-row:hover .todo-row-action,
+.todo-row:focus-within .todo-row-action,
+.todo-row-action:focus-visible {
+  opacity: 1;
+}
+
+/* Coarse pointers never hover — show the actions outright. */
+@media (pointer: coarse) {
+  .todo-row-action {
+    opacity: 1;
+  }
+}
+
+/* --- Empty day ----------------------------------------------------------- */
+
+.todo-empty {
+  padding: var(--space-sm);
+}
+
+/* --- Checkbox: the tick draws itself on ---------------------------------- */
+
+.todo-check {
+  transition:
+    background-color var(--dur-short) var(--ease-out),
+    border-color var(--dur-short) var(--ease-out),
+    transform var(--dur-micro) var(--ease-out);
+}
+
+.todo-check:active {
+  transform: scale(0.88);
+}
+
+.todo-check-tick {
+  stroke-dasharray: 22;
+  stroke-dashoffset: 22;
+  transition: stroke-dashoffset var(--dur-short) var(--ease-in-out);
+}
+
+.todo-check-on .todo-check-tick {
+  stroke-dashoffset: 0;
+}
+
+@keyframes todo-spring {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.012);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.todo-row-springing {
+  animation: todo-spring 320ms var(--ease-out);
+}
+
+/* --- Label ---------------------------------------------------------------- */
+
+/* Block, full width, left-aligned — the whole column is the click target, and
+   nothing inherits a <button>'s centred text. */
+.todo-label {
+  display: block;
+  width: 100%;
+  text-align: left;
+  /* Long URLs break instead of forcing the row wider */
+  overflow-wrap: anywhere;
+  transition: color var(--dur-short) var(--ease-out);
+}
+
+/* --- Links inside a task (issue #66) ------------------------------------- */
+
+/* A link run is styled as a link and opens in the default browser; the text
+   runs around it still open the inline editor. Underline is 1px at a 2px
+   offset — a thick, tight underline reads as a highlight, not a link. */
+.todo-link {
+  /* Inline so it flows with the words around it */
+  display: inline;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  transition: text-decoration-thickness var(--dur-micro) var(--ease-out);
+}
+
+.todo-link:hover {
+  text-decoration-thickness: 2px;
+}
+
+/* A completed task's link recedes with the rest of the row rather than staying
+   the one bright thing left on it. */
+.todo-row-done .todo-link {
+  color: color-mix(in srgb, var(--accent) 55%, var(--text-muted));
+}
+
+/* --- Check: the letters dissolve ----------------------------------------- */
+
+/* Blur is the one property here that isn't transform or opacity. It's also the
+   entire point — an opacity-only fade reads as "the text turned off", not as
+   letters coming apart — and it runs on a handful of glyphs in one row for
+   under half a second, on its own layer. */
+@keyframes todo-dissolve {
+  0% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateY(-3px);
+  }
+}
+
+/* The row keeps its own height while the letters go, so nothing under it moves
+   until the collapse that follows. */
+.todo-row-dissolving {
+  pointer-events: none;
+}
+
+.todo-dissolve {
+  cursor: default;
+}
+
+/* One nowrap box per word: the line breaks stay where they were, so the label
+   can't re-flow the moment the characters become inline-block. */
+.todo-dissolve-word {
+  display: inline-block;
+  white-space: pre;
+  /* A single word longer than the row still has to break somewhere */
+  overflow-wrap: anywhere;
+}
+
+.todo-char {
+  display: inline-block;
+  white-space: pre;
+  animation: todo-dissolve var(--todo-dissolve-ms) var(--ease-in) forwards;
+  /* animation-delay comes from the element's own style — the stagger is
+     computed per character in dissolve.ts */
+  will-change: opacity, filter, transform;
+}
+
+.todo-char-link {
+  color: var(--accent);
+}
+
+/* --- Done section: filed, not crossed out -------------------------------- */
+
+.todo-done-toggle {
+  gap: var(--space-2xs);
+  padding: var(--space-sm);
+  margin-top: var(--space-2xs);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+  transition: color var(--dur-micro) var(--ease-out);
+}
+
+.todo-done-toggle:hover,
+.todo-done-toggle:focus-visible {
+  color: var(--text-primary);
+}
+
+.todo-done-caret {
+  /* Points right when closed, down when open */
+  transform: rotate(-90deg);
+  transition: transform var(--dur-short) var(--ease-out);
+}
+
+.todo-done-caret-open {
+  transform: rotate(0deg);
+}
+
+.todo-done-count {
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+.todo-done-list {
+  animation: todo-done-open var(--dur-short) var(--ease-out);
+}
+
+@keyframes todo-done-open {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* --- Add: the new row grows in from nothing ------------------------------ */
+
+@keyframes todo-row-in {
+  0% {
+    opacity: 0;
+    transform: translateY(5px);
+    max-height: 0;
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    max-height: 72px;
+  }
+}
+
+.todo-row-entering {
+  animation: todo-row-in var(--dur-short) var(--ease-out);
+  overflow: hidden;
+}
+
+/* --- Drag: the lifted row floats, the target shows the landing edge ------ */
+
+.todo-row-dragging {
+  opacity: 0.5;
+  cursor: grabbing;
+}
+
+.todo-row-drop-target {
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+
+/* --- Day switch: the list slides in from the direction of travel --------- */
+
+@keyframes todo-day-in-next {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes todo-day-in-prev {
+  from {
+    opacity: 0;
+    transform: translateX(-14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.todo-day-next {
+  animation: todo-day-in-next var(--dur-short) var(--ease-out);
+}
+.todo-day-prev {
+  animation: todo-day-in-prev var(--dur-short) var(--ease-out);
+}
+
+/* --- Sync pill ----------------------------------------------------------- */
+
+@keyframes todo-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.todo-pill-syncing {
+  animation: todo-pulse 1.4s var(--ease-in-out) infinite;
+}
+
+/* --- Calendar: a month of days, each with its done / pending tally ------- */
+
+.todo-cal-weekdays,
+.todo-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--space-3xs);
+}
+
+.todo-cal-weekdays {
+  margin-bottom: var(--space-2xs);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* Cells are tinted hairline boxes, not cards — the counts are the content. */
+.todo-cal-day {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3xs);
+  min-width: 0;
+  min-height: 64px;
+  padding: var(--space-2xs);
+  text-align: left;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--border) 35%, transparent);
+  border-radius: 8px;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-micro) var(--ease-out),
+    border-color var(--dur-micro) var(--ease-out);
+}
+
+.todo-cal-day:hover {
+  background: color-mix(in srgb, var(--sidebar-hover) 45%, transparent);
+}
+
+/* The neighbouring months' days pad the grid; they recede but stay clickable */
+.todo-cal-day-outside {
+  opacity: 0.4;
+}
+
+.todo-cal-day-selected {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.todo-cal-date {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.7em;
+  height: 1.7em;
+  font-size: var(--text-xs);
+  border-radius: 999px;
+}
+
+.todo-cal-day-today .todo-cal-date {
+  color: var(--surface);
+  background: var(--accent);
+}
+
+.todo-cal-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--space-2xs);
+  font-size: var(--text-2xs);
+  color: var(--text-secondary);
+}
+
+.todo-cal-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.todo-cal-dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 999px;
+}
+
+.todo-cal-dot-done {
+  background: var(--success);
+}
+
+/* Hollow: pending is work not yet filled in */
+.todo-cal-dot-pending {
+  border: 1.5px solid var(--warning);
+}
+
+.todo-cal-legend {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+}
+
+/* --- Schedule picker: a small month to move a task onto ------------------ */
+
+/* Portaled to <body> so the list's scroll box can't clip it, which also puts it
+   outside .todo-page — hence its own face and focus ring below. */
+.todo-picker {
+  position: fixed;
+  z-index: 50;
+  padding: var(--space-xs);
+  font-family: var(--font-ui);
+  background: var(--context-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  animation: todo-done-open var(--dur-short) var(--ease-out);
+}
+
+.todo-picker :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.todo-picker-head {
+  margin-bottom: var(--space-2xs);
+}
+
+.todo-picker-month {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.todo-picker-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    color var(--dur-micro) var(--ease-out),
+    background-color var(--dur-micro) var(--ease-out);
+}
+
+.todo-picker-nav:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--sidebar-hover) 60%, transparent);
+}
+
+.todo-picker-nav:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.todo-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.todo-picker-weekdays {
+  margin-bottom: 2px;
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.todo-picker-day {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  font-size: var(--text-xs);
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-out);
+}
+
+.todo-picker-day:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--sidebar-hover) 60%, transparent);
+}
+
+.todo-picker-day:disabled {
+  color: var(--text-muted);
+  opacity: 0.35;
+  cursor: default;
+}
+
+.todo-picker-day-outside:not(:disabled) {
+  color: var(--text-muted);
+}
+
+.todo-picker-day-today {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+.todo-picker-day-current,
+.todo-picker-day-current:hover:not(:disabled) {
+  color: var(--surface);
+  background: var(--accent);
+}
+
+/* The row's schedule button stays put while its picker is open, even though
+   the pointer has left the row for the panel. */
+.todo-row-action[aria-expanded="true"] {
+  opacity: 1;
+}
+
+/* --- Button states ------------------------------------------------------- */
+
+/* Eight-state discipline: default and hover are per-component, but press and
+   disabled are uniform across the view. */
+.todo-page button:active:not(:disabled) {
+  transform: translateY(0.5px);
+}
+
+.todo-page button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+/* --- Focus ring ---------------------------------------------------------- */
+
+/* Never transitioned — a ring that fades in leaves keyboard users with no
+   indicator for the first frames of the transition. */
+.todo-page :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* The composer draws its own focus state on the surrounding surface, so the
+   inner input doesn't also get a ring inside a ring. */
+.todo-composer input:focus-visible {
+  outline: none;
+}
+
+/* --- Narrow pane --------------------------------------------------------- */
+
+/* The window floor is 480px wide, so the pane bottoms out around 412px. Claw
+   back the gutters and step the display type down a rung. */
+@container todo (max-width: 30rem) {
+  .todo-head {
+    padding: var(--space-lg) var(--space-md) 0;
+  }
+
+  .todo-scroll {
+    padding: var(--space-sm) var(--space-md) var(--space-xl);
+  }
+
+  .todo-day {
+    font-size: var(--text-2xl);
+  }
+
+  .todo-row {
+    gap: var(--space-xs) !important;
+    padding-inline: var(--space-2xs) !important;
+  }
+}
+
+/* --- Short window -------------------------------------------------------- */
+
+/* At the 600px window floor the head has to give up its generous top margin so
+   the list still has room to be a list. */
+@media (max-height: 700px) {
+  .todo-head {
+    padding-top: var(--space-lg);
+  }
+
+  .todo-day {
+    font-size: var(--text-2xl);
+  }
+}
+
+/* --- Reduced motion: every effect above becomes an instant state change -- */
+
+@media (prefers-reduced-motion: reduce) {
+  .todo-row,
+  .todo-check,
+  .todo-check-tick,
+  .todo-label,
+  .todo-daynav,
+  .todo-link,
+  .todo-row-action,
+  .todo-composer,
+  .todo-composer-hint,
+  .todo-progress-fill,
+  .todo-cal-day,
+  .todo-picker-nav,
+  .todo-picker-day {
+    transition: none !important;
+  }
+
+  .todo-page button:active:not(:disabled) {
+    transform: none;
+  }
+
+  .todo-done-caret {
+    transition: none !important;
+  }
+
+  .todo-row-springing,
+  .todo-row-entering,
+  .todo-day-next,
+  .todo-day-prev,
+  .todo-done-list,
+  .todo-pill-syncing,
+  .todo-picker {
+    animation: none !important;
+  }
+
+  /* The dissolve never runs under reduced motion (the toggle skips it), but if
+     one is mid-flight when the setting changes the letters must not be left
+     stranded at zero opacity. */
+  .todo-char {
+    animation: none !important;
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
+}

@@ -1,0 +1,16 @@
+---
+import Layout from "../layouts/Layout.astro";
+import TodoApp from "../components/todo/TodoApp";
+import { NOTION_DATABASE_ID } from "astro:env/server";
+import { notionDatabaseUrl } from "../lib/tasksLogic";
+
+// The list is per-device state (today's date, what's cached) all the way down,
+// so it renders in the browser only.
+const databaseUrl = notionDatabaseUrl(NOTION_DATABASE_ID);
+---
+
+<Layout title="Tasks">
+  <div id="root">
+    <TodoApp client:only="react" databaseUrl={databaseUrl} />
+  </div>
+</Layout>

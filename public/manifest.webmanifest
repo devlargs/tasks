@@ -1,0 +1,13 @@
+{
+  "name": "Tasks",
+  "short_name": "Tasks",
+  "description": "Today's tasks, synced with Largs Hub through Notion",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#181825",
+  "theme_color": "#181825",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
+  ]
+}

@@ -12,6 +12,7 @@ import {
   MdChevronLeft,
   MdChevronRight,
   MdExpandMore,
+  MdInsights,
   MdOutlineCalendarMonth,
   MdOutlineSettings,
   MdRefresh,
@@ -21,6 +22,7 @@ import type { TodoTask } from "../../lib/types";
 import { dissolveDurationMs } from "./dissolve";
 import TaskRow from "./TaskRow";
 import TodoCalendar from "./TodoCalendar";
+import TodoStats from "./TodoStats";
 import { formatDayLabel, formatFullDate, shiftDateKey, todayKey } from "./dates";
 import "./todo.css";
 
@@ -113,8 +115,8 @@ export default function TodoApp({
   const [date, setDate] = useState(todayKey);
   // Direction of the last day change, so the list can slide the right way
   const [slide, setSlide] = useState<"next" | "prev" | null>(null);
-  // The month grid replaces the whole list page while it's open
-  const [view, setView] = useState<"list" | "calendar">("list");
+  // The month grid and the statistics replace the whole list page while open
+  const [view, setView] = useState<"list" | "calendar" | "stats">("list");
   // Whatever was cached for today shows at once; the fresh read replaces it
   const [tasks, setTasks] = useState<TodoTask[]>(() => dayCache.get(todayKey())?.tasks ?? []);
   const [loaded, setLoaded] = useState(() => dayCache.has(todayKey()));
@@ -532,6 +534,19 @@ export default function TodoApp({
     );
   }
 
+  if (view === "stats") {
+    return (
+      <TodoStats
+        api={api}
+        onPickDay={(picked) => {
+          if (picked !== date) goToDay(picked, picked < date ? "prev" : "next");
+          setView("list");
+        }}
+        onClose={() => setView("list")}
+      />
+    );
+  }
+
   // --- list ------------------------------------------------------------------
 
   const chromeButton = {
@@ -684,6 +699,15 @@ export default function TodoApp({
                 aria-label="Calendar"
               >
                 <MdOutlineCalendarMonth size={15} />
+              </button>
+              <button
+                onClick={() => setView("stats")}
+                className="todo-daynav flex items-center justify-center rounded-full cursor-pointer hover:bg-sidebar-hover"
+                style={chromeButton}
+                title="Progress"
+                aria-label="Progress"
+              >
+                <MdInsights size={15} />
               </button>
               {mode === "notion" && (
                 <button

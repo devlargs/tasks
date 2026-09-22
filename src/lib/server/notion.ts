@@ -7,7 +7,7 @@
 // the server has no token or database of its own.
 
 import { createHash } from "node:crypto";
-import { isDateKey } from "../tasksLogic";
+import { isDateKey, sanitizeCarryLog } from "../tasksLogic";
 import type { TodoTask } from "../types";
 import type { NotionConfig } from "./connection";
 
@@ -16,6 +16,9 @@ const NOTION_API = "https://api.notion.com/v1";
 const NOTION_VERSION = "2022-06-28";
 // Notion caps rich_text content at 2000 chars
 const RICH_TEXT_LIMIT = 2000;
+// The carry log's column: the days a task was carried off, space-separated.
+// Named so it can't collide with a column someone already has.
+const CARRIED_PROP = "Carried from";
 // Notion allows ~3 requests a second; a reorder can burst past that
 const MAX_RATE_LIMIT_RETRIES = 3;
 
@@ -129,6 +132,7 @@ function titleProp(config: NotionConfig): Promise<string> {
     if (db.properties["Done"]?.type !== "checkbox") missing["Done"] = { checkbox: {} };
     if (db.properties["Date"]?.type !== "date") missing["Date"] = { date: {} };
     if (db.properties["Order"]?.type !== "number") missing["Order"] = { number: {} };
+    if (!db.properties[CARRIED_PROP]) missing[CARRIED_PROP] = { rich_text: {} };
     if (Object.keys(missing).length > 0) {
       await notionRequest(config, "PATCH", `/databases/${id}`, { properties: missing });
     }
@@ -165,7 +169,15 @@ function pageToTask(title: string, page: NotionPage): TodoTask | null {
     date,
     order: page.properties["Order"]?.number ?? 0,
     editedAt: page.last_edited_time,
+    ...carryLog(page),
   };
+}
+
+// The carry log lives in a text column; anything unparseable reads as none
+function carryLog(page: NotionPage): { carriedFrom?: string[] } {
+  const raw = plainText(page.properties[CARRIED_PROP]?.rich_text);
+  const carriedFrom = sanitizeCarryLog(raw.split(/[\s,]+/));
+  return carriedFrom ? { carriedFrom } : {};
 }
 
 export interface TaskPatch {
@@ -173,7 +185,10 @@ export interface TaskPatch {
   done?: boolean;
   date?: string;
   order?: number;
+  carriedFrom?: string[];
 }
+
+export type NewTask = Required<Omit<TaskPatch, "carriedFrom">> & Pick<TaskPatch, "carriedFrom">;
 
 function buildProperties(title: string, patch: TaskPatch) {
   const properties: Record<string, unknown> = {};
@@ -185,6 +200,11 @@ function buildProperties(title: string, patch: TaskPatch) {
   if (patch.done !== undefined) properties["Done"] = { checkbox: patch.done };
   if (patch.date !== undefined) properties["Date"] = { date: { start: patch.date } };
   if (patch.order !== undefined) properties["Order"] = { number: patch.order };
+  if (patch.carriedFrom !== undefined) {
+    properties[CARRIED_PROP] = {
+      rich_text: [{ type: "text", text: { content: patch.carriedFrom.join(" ") } }],
+    };
+  }
   return properties;
 }
 
@@ -225,10 +245,7 @@ export async function getTask(config: NotionConfig, pageId: string): Promise<Tod
   return pageToTask(title, page);
 }
 
-export async function createTask(
-  config: NotionConfig,
-  task: Required<TaskPatch>,
-): Promise<TodoTask> {
+export async function createTask(config: NotionConfig, task: NewTask): Promise<TodoTask> {
   const title = await titleProp(config);
   const page = await notionRequest<NotionPage>(config, "POST", "/pages", {
     parent: { database_id: config.databaseId },

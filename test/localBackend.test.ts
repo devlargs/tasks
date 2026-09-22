@@ -99,6 +99,28 @@ describe("local backend", () => {
     expect((await backend.move("a", "2026-09-22")).ok).toBe(false);
   });
 
+  it("logs carry-overs, and counts them in the statistics", async () => {
+    const { store, backend } = setup();
+    seed(store, [
+      { id: "old", date: "2026-09-21" },
+      { id: "today" },
+      { id: "done-today", done: true },
+      { id: "future", date: "2026-09-25" },
+    ]);
+    await backend.list("2026-09-23"); // sweeps "old" onto today
+    await backend.move("today", "2026-09-24"); // deferred off today
+    await backend.move("future", "2026-09-27"); // re-planned, not a carry
+    const byId = new Map(readLocalTasks(store).map((t) => [t.id, t]));
+    expect(byId.get("old")?.carriedFrom).toEqual(["2026-09-21"]);
+    expect(byId.get("today")?.carriedFrom).toEqual(["2026-09-23"]);
+    expect(byId.get("future")?.carriedFrom).toBeUndefined();
+    const res = await backend.stats("2026-09-20", "2026-09-23");
+    expect(res.ok && res.days).toEqual({
+      "2026-09-21": { done: 0, carried: 1 },
+      "2026-09-23": { done: 1, carried: 1 },
+    });
+  });
+
   it("deletes, and treats deleting a missing task as done", async () => {
     const { store, backend } = setup();
     seed(store, [{ id: "a" }, { id: "b" }]);

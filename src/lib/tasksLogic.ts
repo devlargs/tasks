@@ -7,7 +7,7 @@
 // Kept free of Notion/Astro imports so it can be unit-tested
 // (test/tasksLogic.test.ts).
 
-import type { TodoTask } from "./types";
+import type { TodoDayStats, TodoTask } from "./types";
 
 export type Task = TodoTask;
 
@@ -147,7 +147,62 @@ export function carryOverPending(backlog: Task[], onDay: Task[], toDate: string)
         a.date.localeCompare(b.date) || a.order - b.order || a.editedAt.localeCompare(b.editedAt),
     );
   let order = nextOrder(onDay, toDate);
-  return pending.map((task) => ({ ...task, date: toDate, order: order++ }));
+  return pending.map((task) => ({
+    ...logCarry(task, task.date),
+    date: toDate,
+    order: order++,
+  }));
+}
+
+// --- Statistics ----------------------------------------------------------------
+
+// A task can bounce along for weeks; the log keeps its most recent days.
+export const MAX_CARRY_LOG = 60;
+
+// The widest range the statistics view asks for
+export const MAX_STATS_DAYS = 92;
+
+// Records that `task` was left unfinished on `fromDay` and carried off it.
+// Kept sorted and unique, so logging the same day twice changes nothing.
+export function logCarry(task: Task, fromDay: string): Task {
+  const days = new Set(task.carriedFrom ?? []);
+  days.add(fromDay);
+  return { ...task, carriedFrom: [...days].sort().slice(-MAX_CARRY_LOG) };
+}
+
+// Whether moving an unfinished task off `from` onto `to` counts as carrying
+// it over: it has to leave today or an earlier day. Re-planning a task from
+// one future day to another isn't falling behind.
+export function isCarry(task: Task, to: string, today: string): boolean {
+  return !task.done && task.date <= today && to > task.date;
+}
+
+// Carry logs as they arrive from storage or Notion: real days only, sorted,
+// unique, capped. Anything else reads as no log.
+export function sanitizeCarryLog(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const days = [...new Set(raw.filter(isRealDate))].sort().slice(-MAX_CARRY_LOG);
+  return days.length > 0 ? days : undefined;
+}
+
+// Per-day statistics for `from` through `to`. Done counts come from where the
+// finished tasks sit; carried counts from every task's carry log. Carrying only
+// ever moves a task forward, so every task carried off a day in the range now
+// sits on or after `from` — `tasks` needs nothing earlier than that.
+export function summarizeStats(
+  tasks: Task[],
+  from: string,
+  to: string,
+): Record<string, TodoDayStats> {
+  const days: Record<string, TodoDayStats> = {};
+  const day = (key: string) => (days[key] ||= { done: 0, carried: 0 });
+  for (const task of tasks) {
+    if (task.done && task.date >= from && task.date <= to) day(task.date).done++;
+    for (const carriedDay of task.carriedFrom ?? []) {
+      if (carriedDay >= from && carriedDay <= to) day(carriedDay).carried++;
+    }
+  }
+  return days;
 }
 
 // --- Validation --------------------------------------------------------------

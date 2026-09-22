@@ -13,6 +13,16 @@ export interface TodoTask {
   order: number;
   // When it last changed (Notion's last_edited_time for the page)
   editedAt: string;
+  // Days this task was left unfinished on and carried off, oldest first. Only
+  // recorded from when statistics were added; absent means none recorded.
+  carriedFrom?: string[];
+}
+
+// One day's statistics: what got done on it, and what was left unfinished and
+// carried off it onto a later day
+export interface TodoDayStats {
+  done: number;
+  carried: number;
 }
 
 // One day's tally for the calendar view
@@ -48,6 +58,11 @@ export type ConnectResult = ApiResult<{
 // a batch can fail part-way through.
 export type ImportResult =
   { ok: true; imported: string[] } | { ok: false; error: string; imported?: string[] };
+
+export type StatsResult = ApiResult<{
+  // Keyed YYYY-MM-DD; days with nothing done or carried are absent
+  days: Record<string, TodoDayStats>;
+}>;
 
 export type CalendarResult = ApiResult<{
   // Keyed YYYY-MM-DD; days with no tasks are absent

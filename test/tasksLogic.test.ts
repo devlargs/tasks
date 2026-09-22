@@ -131,7 +131,7 @@ describe("carryOverPending", () => {
     ];
     const onDay = [task({ id: "t", date: today, order: 4 })];
     expect(carryOverPending(backlog, onDay, today)).toEqual([
-      { ...backlog[0], date: today, order: 5 },
+      { ...backlog[0], date: today, order: 5, carriedFrom: ["2026-08-23"] },
     ]);
   });
 

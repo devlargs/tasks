@@ -8,6 +8,7 @@ import type {
   ConnectResult,
   ImportResult,
   ListResult,
+  StatsResult,
   TaskResult,
   TasksResult,
   TodoTask,
@@ -19,6 +20,7 @@ import type {
 export interface TaskBackend {
   list(date: string): Promise<ListResult>;
   calendar(from: string, to: string): Promise<CalendarResult>;
+  stats(from: string, to: string): Promise<StatsResult>;
   create(date: string, text: string): Promise<TaskResult>;
   update(id: string, patch: { text?: string; done?: boolean }): Promise<TaskResult>;
   move(id: string, date: string): Promise<TaskResult>;
@@ -46,6 +48,7 @@ export const notionBackend: TaskBackend = {
   list: (date) => call<ListResult>("GET", `/api/tasks?${q({ date, today: todayKey() })}`),
   calendar: (from, to) =>
     call<CalendarResult>("GET", `/api/calendar?${q({ from, to, today: todayKey() })}`),
+  stats: (from, to) => call<StatsResult>("GET", `/api/stats?${q({ from, to, today: todayKey() })}`),
   create: (date, text) => call<TaskResult>("POST", "/api/tasks", { date, text }),
   update: (id, patch) => call<TaskResult>("PATCH", `/api/tasks/${encodeURIComponent(id)}`, patch),
   move: (id, date) =>
@@ -65,6 +68,13 @@ export const connection = {
   disconnect: () => call<{ ok: boolean; error?: string }>("POST", "/api/disconnect"),
   importTasks: (tasks: TodoTask[]) =>
     call<ImportResult>("POST", "/api/tasks/import", {
-      tasks: tasks.map(({ id, text, done, date, order }) => ({ id, text, done, date, order })),
+      tasks: tasks.map(({ id, text, done, date, order, carriedFrom }) => ({
+        id,
+        text,
+        done,
+        date,
+        order,
+        carriedFrom,
+      })),
     }),
 };

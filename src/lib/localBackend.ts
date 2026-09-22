@@ -6,6 +6,12 @@
 import type { TaskBackend } from "./api";
 import {
   carryOverPending,
+  isCarry,
+  logCarry,
+  MAX_STATS_DAYS,
+  sanitizeCarryLog,
+  shiftDateKey,
+  summarizeStats,
   isRealDate,
   isSchedulableDate,
   nextOrder,
@@ -43,7 +49,11 @@ const isTask = (value: unknown): value is TodoTask => {
 export function readLocalTasks(store: KeyValueStore): TodoTask[] {
   try {
     const data = JSON.parse(store.getItem(LOCAL_TASKS_KEY) ?? "[]") as unknown;
-    return Array.isArray(data) ? data.filter(isTask) : [];
+    if (!Array.isArray(data)) return [];
+    return data.filter(isTask).map(({ carriedFrom, ...task }) => {
+      const log = sanitizeCarryLog(carriedFrom);
+      return log ? { ...task, carriedFrom: log } : task;
+    });
   } catch {
     return [];
   }
@@ -115,6 +125,18 @@ export function createLocalBackend({
       return { ok: true, days: summarizeDays(tasks, from, to) };
     },
 
+    async stats(from, to) {
+      if (!isRealDate(from) || !isRealDate(to) || from > to) {
+        return { ok: false, error: "Invalid date range." };
+      }
+      if (shiftDateKey(from, MAX_STATS_DAYS) < to) {
+        return { ok: false, error: "Date range too long." };
+      }
+      const { tasks, carried } = carryIntoToday(read(), today());
+      if (carried.length > 0) save(tasks);
+      return { ok: true, days: summarizeStats(tasks, from, to) };
+    },
+
     async create(date, rawText) {
       const text = sanitizeTaskText(rawText);
       if (!isRealDate(date)) return { ok: false, error: "Invalid date." };
@@ -156,8 +178,10 @@ export function createLocalBackend({
       const task = findTask(tasks, id);
       if (!task) return { ok: false, error: "Task not found." };
       if (task.date === date) return { ok: true, task };
-      // Onto the end of that day, where the carry-over would put it
-      const moved = { ...task, date, order: nextOrder(tasks, date), editedAt: now() };
+      // Onto the end of that day, where the carry-over would put it. Leaving
+      // today (or an earlier day) unfinished counts as carrying it over.
+      const logged = isCarry(task, date, today()) ? logCarry(task, task.date) : task;
+      const moved = { ...logged, date, order: nextOrder(tasks, date), editedAt: now() };
       const error = save(tasks.map((t) => (t.id === id ? moved : t)));
       return error ? { ok: false, error } : { ok: true, task: moved };
     },

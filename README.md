@@ -29,6 +29,10 @@ The same behaviour as Largs Hub's Todo:
 - Links in task text are clickable
 - Done tasks filed under a collapsible **Done tasks** section, with a progress bar
 - Month **calendar** with done/pending counts per day
+- **Progress** view: tasks done and tasks carried over to a later day, per day, over the last
+  7, 14 or 30 days, with a follow-through rate. Carry-overs are recorded from the first day a
+  device runs this version (in a `Carried from` column in Notion, added for you); days before
+  that show what got done only
 - Catppuccin Mocha/Latte, following the device's light/dark setting
 
 Web-specific:

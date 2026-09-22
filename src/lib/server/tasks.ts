@@ -4,6 +4,9 @@
 
 import {
   carryOverPending,
+  isCarry,
+  logCarry,
+  summarizeStats,
   nextOrder,
   reorderTasks,
   sortTasks,
@@ -55,7 +58,10 @@ export async function carryIntoToday(config: NotionConfig, today: string): Promi
   const moves = carryOverPending(backlog, await listDay(config, today), today);
   await applyPatches(
     config,
-    moves.map((t) => ({ id: t.id, patch: { date: t.date, order: t.order } })),
+    moves.map((t) => ({
+      id: t.id,
+      patch: { date: t.date, order: t.order, carriedFrom: t.carriedFrom },
+    })),
   );
   return moves.map((t) => t.id);
 }
@@ -104,12 +110,26 @@ export async function move(
   config: NotionConfig,
   id: string,
   toDate: string,
+  today: string,
 ): Promise<TodoTask | null> {
   const task = await getTask(config, id);
   if (!task) return null;
   if (task.date === toDate) return task;
   const order = nextOrder(await listDay(config, toDate), toDate);
-  return updateTask(config, id, { date: toDate, order });
+  // Leaving today (or an earlier day) unfinished counts as carrying it over
+  const carriedFrom = isCarry(task, toDate, today)
+    ? logCarry(task, task.date).carriedFrom
+    : undefined;
+  return updateTask(config, id, { date: toDate, order, carriedFrom });
+}
+
+// Done and carried-over counts per day, for the statistics view. Every task
+// carried off a day in the range now sits on or after `from`, so one query
+// from there on finds them all.
+export async function stats(config: NotionConfig, from: string, to: string, today: string) {
+  await carryIntoToday(config, today);
+  const tasks = await queryTasks(config, { property: "Date", date: { on_or_after: from } });
+  return summarizeStats(tasks, from, to);
 }
 
 export async function remove(config: NotionConfig, id: string): Promise<void> {
@@ -122,7 +142,14 @@ export async function remove(config: NotionConfig, id: string): Promise<void> {
 // that are really in Notion and a retry doesn't create duplicates.
 export async function importTasks(
   config: NotionConfig,
-  tasks: { id: string; text: string; done: boolean; date: string; order: number }[],
+  tasks: {
+    id: string;
+    text: string;
+    done: boolean;
+    date: string;
+    order: number;
+    carriedFrom?: string[];
+  }[],
 ): Promise<{ imported: string[]; error?: unknown }> {
   const imported: string[] = [];
   for (const { id, ...task } of tasks) {

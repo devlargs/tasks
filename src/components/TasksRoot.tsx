@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { connection, notionBackend } from "../lib/api";
 import { createLocalBackend, type KeyValueStore } from "../lib/localBackend";
+import { carryTrackingSince } from "../lib/tracking";
 import Setup from "./setup/Setup";
 import TodoApp, { resetDayCache } from "./todo/TodoApp";
 import { todayKey } from "./todo/dates";
@@ -46,6 +47,11 @@ export default function TasksRoot({ connected, databaseUrl: initialUrl }: TasksR
   const [databaseUrl, setDatabaseUrl] = useState(initialUrl);
   // A device on local storage opening the Notion form from the settings menu
   const [connecting, setConnecting] = useState(false);
+
+  // Carry-overs are recorded from the first day this code runs on the device
+  useEffect(() => {
+    carryTrackingSince(todayKey());
+  }, []);
 
   const localBackend = useMemo(
     () => createLocalBackend({ store: browserStore, today: todayKey }),

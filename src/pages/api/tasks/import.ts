@@ -1,7 +1,12 @@
 import type { APIRoute } from "astro";
 import { fail, failure, ok, readJson, withNotion } from "../../../lib/server/http";
 import { importTasks } from "../../../lib/server/tasks";
-import { isRealDate, MAX_IMPORT_BATCH, sanitizeTaskText } from "../../../lib/tasksLogic";
+import {
+  isRealDate,
+  MAX_IMPORT_BATCH,
+  sanitizeCarryLog,
+  sanitizeTaskText,
+} from "../../../lib/tasksLogic";
 
 // Copies tasks kept on the device into Notion, as the device connects. The
 // reply lists the ids that made it, even when a later one failed.
@@ -24,7 +29,14 @@ export const POST: APIRoute = ({ request, cookies }) =>
       ) {
         return fail("Invalid tasks.");
       }
-      tasks.push({ id: t.id, text, done: t.done === true, date: t.date, order: t.order });
+      tasks.push({
+        id: t.id,
+        text,
+        done: t.done === true,
+        date: t.date,
+        order: t.order,
+        carriedFrom: sanitizeCarryLog(t.carriedFrom),
+      });
     }
     const { imported, error } = await importTasks(config, tasks);
     if (!error) return ok({ imported });

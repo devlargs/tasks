@@ -22,6 +22,12 @@
   --success: #a6e3a1;
   --danger: #f38ba8;
   --warning: #f9e2af;
+
+  /* Statistics chart series, validated as a pair against --surface (CVD
+     separation, lightness band, 3:1 contrast). Catppuccin's own blue and
+     peach sit too light for marks on this surface. */
+  --chart-done: #5f8fee;
+  --chart-carried: #d47a45;
 }
 
 @media (prefers-color-scheme: light) {
@@ -43,6 +49,9 @@
     --success: #40a02b;
     --danger: #d20f39;
     --warning: #df8e1d;
+
+    --chart-done: #1e66f5;
+    --chart-carried: #d9530b;
   }
 }
 

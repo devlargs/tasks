@@ -1,12 +1,21 @@
 # Tasks
 
-Largs Hub's Todo list on the web, so you can add tasks from your phone. It lives at
-**tasks.ralphlargo.com**.
+A daily task list that carries unfinished work forward. It lives at **tasks.ralphlargo.com**, and
+it's the Todo service inside Largs Hub.
 
-The site has no database of its own. It reads and writes the **same Notion database** Largs Hub's
-Todo is connected to, using the same schema: a title, a `Done` checkbox, a `Date` and an `Order`
-number. A task added here shows up in the desktop app the next time that day is refreshed
-(on open, after 30 s, or with the Refresh button), and the other way round.
+Anyone can use it, with no account. The first time you open it, it asks where to keep your tasks:
+
+- **Sync with Notion.** Paste an integration secret and a database link. Tasks are read from and
+  written to that database, so every device you connect to it sees the same list. The database
+  gets a title, a `Done` checkbox, a `Date` and an `Order` number (any missing ones are added for
+  you).
+- **Keep them on this device.** Tasks stay in the browser's local storage. Nothing leaves the
+  device. You can connect Notion later from the settings menu, and the tasks already on the device
+  are copied into the database.
+
+The site has no database and no settings of its own. A Notion connection lives in an httpOnly
+cookie on the device that made it; the server reads it on each request to talk to Notion on that
+visitor's behalf and doesn't store it.
 
 ## What it does
 
@@ -24,9 +33,9 @@ The same behaviour as Largs Hub's Todo:
 
 Web-specific:
 
-- Password sign-in. One password and a signed 90-day cookie, with no accounts.
-- Changes appear on screen immediately and save to Notion in the background. The pill shows
-  Syncing/Synced. If a save fails, an error appears and the day is re-read from Notion.
+- No accounts or passwords. Each device chooses Notion or local storage on first open.
+- Changes appear on screen immediately and save in the background. With Notion, the pill shows
+  Syncing/Synced. If a save fails, an error appears and the day is re-read.
 - The list re-reads when you come back to the tab, and follows the date over midnight.
 - Can be installed to the home screen (manifest + icons).
 
@@ -34,22 +43,15 @@ Web-specific:
 
 ```bash
 npm install
-cp .env.example .env   # fill it in, see below
 npm run dev
 ```
 
-| Variable             | What                                                                                                                      |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `NOTION_API_KEY`     | The integration token Largs Hub uses                                                                                       |
-| `NOTION_DATABASE_ID` | The task database's ID or URL. In Largs Hub, open Todo › ⚙ › **View database in Notion** and copy that URL.               |
-| `APP_PASSWORD`       | The password you sign in with (8+ characters)                                                                              |
-| `SESSION_SECRET`     | 32+ random characters: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`                          |
+There are no environment variables. Open the site and pick Notion or local storage.
 
 ## Deploy (Vercel)
 
 1. Import `devlargs/tasks` in Vercel. The Astro framework preset is detected automatically.
-2. Add the four environment variables above.
-3. Add the domain `tasks.ralphlargo.com` and point a `CNAME` for `tasks` at `cname.vercel-dns.com`.
+2. Add the domain `tasks.ralphlargo.com` and point a `CNAME` for `tasks` at `cname.vercel-dns.com`.
 
 ## Commands
 
@@ -63,7 +65,10 @@ npm test           # Vitest
 ## Layout
 
 - `src/lib/tasksLogic.ts`: pure day/order/carry-over logic, ported from Largs Hub's `electron/tasksLogic.ts`
-- `src/lib/server/`: Notion client, task operations and auth (server-only; the token never reaches the browser)
-- `src/pages/api/`: JSON routes the page calls
+- `src/lib/localBackend.ts`: the same task operations on the device's local storage
+- `src/lib/server/`: the visitor's Notion connection (cookie), Notion client and task operations
+  (server-only; the page's scripts never see the secret)
+- `src/pages/api/`: JSON routes the page calls, plus `connect`, `disconnect` and `tasks/import`
+- `src/components/setup/`: the first-open choice and the Notion connect form
 - `src/components/todo/`: the React island, ported from Largs Hub's `src/components/todo/`
-- `src/middleware.ts`: sign-in gate and same-origin check for writes
+- `src/middleware.ts`: same-origin check for writes

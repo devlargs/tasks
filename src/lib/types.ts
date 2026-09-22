@@ -2,8 +2,8 @@
 // declarations only — this file is bundled into both the server and the client.
 
 export interface TodoTask {
-  // The Notion page id. Unlike Largs Hub, the web app keeps no local store:
-  // the page is the task, so its id is the only one there is.
+  // The Notion page id for a connected device; a generated "local-…" id for
+  // tasks kept on the device.
   id: string;
   text: string;
   done: boolean;
@@ -11,7 +11,7 @@ export interface TodoTask {
   date: string;
   // Manual position within the day (ascending)
   order: number;
-  // Notion's last_edited_time for the page
+  // When it last changed (Notion's last_edited_time for the page)
   editedAt: string;
 }
 
@@ -38,6 +38,16 @@ export type ListResult = ApiResult<{
 export type TaskResult = ApiResult<{ task: TodoTask }>;
 
 export type TasksResult = ApiResult<{ tasks: TodoTask[] }>;
+
+export type ConnectResult = ApiResult<{
+  // The database's page on notion.so, for the settings menu
+  databaseUrl: string | null;
+}>;
+
+// Ids of the device's tasks that are now in Notion. Present on failure too:
+// a batch can fail part-way through.
+export type ImportResult =
+  { ok: true; imported: string[] } | { ok: false; error: string; imported?: string[] };
 
 export type CalendarResult = ApiResult<{
   // Keyed YYYY-MM-DD; days with no tasks are absent

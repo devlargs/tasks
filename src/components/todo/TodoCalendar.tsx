@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { MdChevronLeft, MdChevronRight, MdOutlineChecklist } from "react-icons/md";
-import { api } from "../../lib/api";
+import type { TaskBackend } from "../../lib/api";
 import type { TodoDaySummary } from "../../lib/types";
 import {
   inMonth,
@@ -14,6 +14,7 @@ import {
 import { parseDateKey, todayKey } from "./dates";
 
 interface TodoCalendarProps {
+  api: TaskBackend;
   // The day the list was showing, outlined so you can see where you came from
   selectedDate: string;
   onPickDay: (date: string) => void;
@@ -30,11 +31,7 @@ const chromeButton = {
   border: "none",
 } as const;
 
-export default function TodoCalendar({
-  selectedDate,
-  onPickDay,
-  onClose,
-}: TodoCalendarProps) {
+export default function TodoCalendar({ api, selectedDate, onPickDay, onClose }: TodoCalendarProps) {
   const [month, setMonth] = useState(() => monthStart(selectedDate));
   const [slide, setSlide] = useState<"next" | "prev" | null>(null);
   const [days, setDays] = useState<Record<string, TodoDaySummary>>({});
@@ -58,7 +55,7 @@ export default function TodoCalendar({
     return () => {
       cancelled = true;
     };
-  }, [grid]);
+  }, [api, grid]);
 
   const goToMonth = (next: string) => {
     setSlide(next > month ? "next" : "prev");

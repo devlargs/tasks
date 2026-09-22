@@ -16,7 +16,7 @@ import {
   MdOutlineSettings,
   MdRefresh,
 } from "react-icons/md";
-import { api } from "../../lib/api";
+import type { TaskBackend } from "../../lib/api";
 import type { TodoTask } from "../../lib/types";
 import { dissolveDurationMs } from "./dissolve";
 import TaskRow from "./TaskRow";
@@ -24,15 +24,18 @@ import TodoCalendar from "./TodoCalendar";
 import { formatDayLabel, formatFullDate, shiftDateKey, todayKey } from "./dates";
 import "./todo.css";
 
-// The web port of Largs Hub's TodoPage. The desktop app writes to a local
-// store and syncs to Notion behind the scenes; here Notion is the store, so
-// every change is applied on screen first (optimistically) and the request
-// follows. A failed request says so and re-reads the day, so the list never
-// keeps showing something Notion doesn't have.
+// The daily list. Tasks live in the device's Notion database or on the device
+// itself (see TaskBackend); either way every change is applied on screen first
+// (optimistically) and the write follows. A failed write says so and re-reads
+// the day, so the list never keeps showing something that wasn't saved.
 
 interface TodoAppProps {
+  api: TaskBackend;
+  mode: "notion" | "local";
   // The connected database's page on notion.so, for the settings menu
   databaseUrl: string | null;
+  onConnectNotion: () => void;
+  onDisconnectNotion: () => void;
 }
 
 // Days read before, keyed by date. A day you've seen renders from here at once;
@@ -57,6 +60,17 @@ function restoreCache(): Map<string, CachedDay> {
 }
 
 const dayCache = restoreCache();
+
+// Switching between Notion and the device changes whose tasks the cached days
+// are, so they're dropped rather than shown for a moment under the other one.
+export function resetDayCache(): void {
+  dayCache.clear();
+  try {
+    localStorage.removeItem(CACHE_STORAGE_KEY);
+  } catch {
+    // Nothing stored, nothing to clear
+  }
+}
 
 function persistCache(): void {
   try {
@@ -89,7 +103,13 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
 const DRAG_SCROLL_EDGE = 48;
 const DRAG_SCROLL_STEP = 12;
 
-export default function TodoApp({ databaseUrl }: TodoAppProps) {
+export default function TodoApp({
+  api,
+  mode,
+  databaseUrl,
+  onConnectNotion,
+  onDisconnectNotion,
+}: TodoAppProps) {
   const [date, setDate] = useState(todayKey);
   // Direction of the last day change, so the list can slide the right way
   const [slide, setSlide] = useState<"next" | "prev" | null>(null);
@@ -136,31 +156,34 @@ export default function TodoApp({ databaseUrl }: TodoAppProps) {
 
   // --- loading ---------------------------------------------------------------
 
-  const loadDay = useCallback(async (targetDate: string, manual = false) => {
-    if (manual) setRefreshing(true);
-    const epoch = writeEpoch.current;
-    setReading((n) => n + 1);
-    const res = await api.list(targetDate);
-    setReading((n) => n - 1);
-    if (manual) setRefreshing(false);
-    if (dateRef.current !== targetDate) return; // navigated away meanwhile
-    if (epoch !== writeEpoch.current || inFlightRef.current > 0) {
-      reloadWanted.current = true;
-      return;
-    }
-    setLoaded(true);
-    if (res.ok) {
-      setTasks(res.tasks);
-      dayCache.set(targetDate, { tasks: res.tasks, at: Date.now() });
-      persistCache();
-      // Anything just carried over from an earlier day grows in, so a list
-      // that gained tasks on its own explains itself.
-      if (res.carried.length) setEnteringIds(res.carried);
-      if (manual) setError(null);
-    } else {
-      setError(res.error);
-    }
-  }, []);
+  const loadDay = useCallback(
+    async (targetDate: string, manual = false) => {
+      if (manual) setRefreshing(true);
+      const epoch = writeEpoch.current;
+      setReading((n) => n + 1);
+      const res = await api.list(targetDate);
+      setReading((n) => n - 1);
+      if (manual) setRefreshing(false);
+      if (dateRef.current !== targetDate) return; // navigated away meanwhile
+      if (epoch !== writeEpoch.current || inFlightRef.current > 0) {
+        reloadWanted.current = true;
+        return;
+      }
+      setLoaded(true);
+      if (res.ok) {
+        setTasks(res.tasks);
+        dayCache.set(targetDate, { tasks: res.tasks, at: Date.now() });
+        persistCache();
+        // Anything just carried over from an earlier day grows in, so a list
+        // that gained tasks on its own explains itself.
+        if (res.carried.length) setEnteringIds(res.carried);
+        if (manual) setError(null);
+      } else {
+        setError(res.error);
+      }
+    },
+    [api],
+  );
 
   const loadIfStale = useCallback(
     (targetDate: string) => {
@@ -359,7 +382,7 @@ export default function TodoApp({ databaseUrl }: TodoAppProps) {
         ),
       );
     });
-  }, [draft, date, tasks, write]);
+  }, [api, draft, date, tasks, write]);
 
   const handleToggle = useCallback(
     async (task: TodoTask) => {
@@ -377,7 +400,7 @@ export default function TodoApp({ databaseUrl }: TodoAppProps) {
       setTasks((current) => current.map((t) => (t.id === task.id ? { ...t, done: !t.done } : t)));
       await request;
     },
-    [withId, collapseRow],
+    [api, withId, collapseRow],
   );
 
   const handleRename = useCallback(
@@ -385,7 +408,7 @@ export default function TodoApp({ databaseUrl }: TodoAppProps) {
       setTasks((current) => current.map((t) => (t.id === task.id ? { ...t, text } : t)));
       await withId(task.id, (id) => api.update(id, { text }));
     },
-    [withId],
+    [api, withId],
   );
 
   // Moves a task off this day: the row collapses out and lands at the end of
@@ -400,7 +423,7 @@ export default function TodoApp({ databaseUrl }: TodoAppProps) {
       const res = await request;
       if (res.ok) applyTask(task.id, res.task);
     },
-    [withId, collapseRow, applyTask],
+    [api, withId, collapseRow, applyTask],
   );
 
   const handleDelete = useCallback(
@@ -410,7 +433,7 @@ export default function TodoApp({ databaseUrl }: TodoAppProps) {
       setTasks((current) => current.filter((t) => t.id !== task.id));
       await request;
     },
-    [withId, collapseRow],
+    [api, withId, collapseRow],
   );
 
   // --- drag to reorder -------------------------------------------------------
@@ -443,45 +466,42 @@ export default function TodoApp({ databaseUrl }: TodoAppProps) {
         realIds.filter((id): id is string => id !== null),
       );
     });
-  }, [openTasks, doneTasks, date, write, resolveId]);
+  }, [api, openTasks, doneTasks, date, write, resolveId]);
 
-  const startDrag = useCallback(
-    (taskId: string, e: ReactPointerEvent) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      dragState.current = { id: taskId, target: null };
-      setDraggingId(taskId);
+  const startDrag = useCallback((taskId: string, e: ReactPointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    dragState.current = { id: taskId, target: null };
+    setDraggingId(taskId);
 
-      const onMove = (ev: PointerEvent) => {
-        const drag = dragState.current;
-        if (!drag) return;
-        const row = document
-          .elementFromPoint(ev.clientX, ev.clientY)
-          ?.closest<HTMLElement>("[data-drop-id]");
-        drag.target = row?.dataset.dropId ?? drag.target;
-        setDropTargetId(drag.target);
-        const scroller = scrollRef.current;
-        if (scroller) {
-          const box = scroller.getBoundingClientRect();
-          if (ev.clientY < box.top + DRAG_SCROLL_EDGE) scroller.scrollBy(0, -DRAG_SCROLL_STEP);
-          else if (ev.clientY > box.bottom - DRAG_SCROLL_EDGE) {
-            scroller.scrollBy(0, DRAG_SCROLL_STEP);
-          }
+    const onMove = (ev: PointerEvent) => {
+      const drag = dragState.current;
+      if (!drag) return;
+      const row = document
+        .elementFromPoint(ev.clientX, ev.clientY)
+        ?.closest<HTMLElement>("[data-drop-id]");
+      drag.target = row?.dataset.dropId ?? drag.target;
+      setDropTargetId(drag.target);
+      const scroller = scrollRef.current;
+      if (scroller) {
+        const box = scroller.getBoundingClientRect();
+        if (ev.clientY < box.top + DRAG_SCROLL_EDGE) scroller.scrollBy(0, -DRAG_SCROLL_STEP);
+        else if (ev.clientY > box.bottom - DRAG_SCROLL_EDGE) {
+          scroller.scrollBy(0, DRAG_SCROLL_STEP);
         }
-      };
-      const onEnd = (ev: PointerEvent) => {
-        window.removeEventListener("pointermove", onMove);
-        window.removeEventListener("pointerup", onEnd);
-        window.removeEventListener("pointercancel", onEnd);
-        if (ev.type === "pointercancel" && dragState.current) dragState.current.target = null;
-        finishDragRef.current();
-      };
-      window.addEventListener("pointermove", onMove);
-      window.addEventListener("pointerup", onEnd);
-      window.addEventListener("pointercancel", onEnd);
-    },
-    [],
-  );
+      }
+    };
+    const onEnd = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onEnd);
+      window.removeEventListener("pointercancel", onEnd);
+      if (ev.type === "pointercancel" && dragState.current) dragState.current.target = null;
+      finishDragRef.current();
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onEnd);
+    window.addEventListener("pointercancel", onEnd);
+  }, []);
 
   // The listeners above outlive a render; they always call the latest drop
   const finishDragRef = useRef(finishDrag);
@@ -501,6 +521,7 @@ export default function TodoApp({ databaseUrl }: TodoAppProps) {
   if (view === "calendar") {
     return (
       <TodoCalendar
+        api={api}
         selectedDate={date}
         onPickDay={(picked) => {
           if (picked !== date) goToDay(picked, picked < date ? "prev" : "next");
@@ -532,8 +553,9 @@ export default function TodoApp({ databaseUrl }: TodoAppProps) {
     textDecoration: "none",
   } as const;
 
+  // On the device there's nothing to sync with or refresh from
   const syncing = inFlight > 0 || reading > 0;
-  const syncPill = (
+  const syncPill = mode === "notion" && (
     <button
       onClick={() => void loadDay(date, true)}
       title={
@@ -663,15 +685,17 @@ export default function TodoApp({ databaseUrl }: TodoAppProps) {
               >
                 <MdOutlineCalendarMonth size={15} />
               </button>
-              <button
-                onClick={() => void loadDay(date, true)}
-                title="Refresh from Notion"
-                aria-label="Refresh from Notion"
-                className="todo-daynav flex items-center justify-center rounded-full cursor-pointer hover:bg-sidebar-hover"
-                style={chromeButton}
-              >
-                <MdRefresh size={15} className={refreshing ? "animate-spin" : ""} />
-              </button>
+              {mode === "notion" && (
+                <button
+                  onClick={() => void loadDay(date, true)}
+                  title="Refresh from Notion"
+                  aria-label="Refresh from Notion"
+                  className="todo-daynav flex items-center justify-center rounded-full cursor-pointer hover:bg-sidebar-hover"
+                  style={chromeButton}
+                >
+                  <MdRefresh size={15} className={refreshing ? "animate-spin" : ""} />
+                </button>
+              )}
               <div className="relative">
                 <button
                   onClick={() => setMenuOpen((v) => !v)}
@@ -697,7 +721,7 @@ export default function TodoApp({ databaseUrl }: TodoAppProps) {
                         boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
                       }}
                     >
-                      {databaseUrl && (
+                      {mode === "notion" && databaseUrl && (
                         <a
                           href={databaseUrl}
                           target="_blank"
@@ -709,15 +733,17 @@ export default function TodoApp({ databaseUrl }: TodoAppProps) {
                           View database in Notion
                         </a>
                       )}
-                      <form method="post" action="/api/logout">
-                        <button
-                          type="submit"
-                          className="block w-full text-left cursor-pointer hover:bg-sidebar-hover"
-                          style={menuItem}
-                        >
-                          Sign out
-                        </button>
-                      </form>
+                      <button
+                        onClick={() => {
+                          setMenuOpen(false);
+                          if (mode === "notion") onDisconnectNotion();
+                          else onConnectNotion();
+                        }}
+                        className="block w-full text-left cursor-pointer hover:bg-sidebar-hover"
+                        style={menuItem}
+                      >
+                        {mode === "notion" ? "Disconnect Notion" : "Connect Notion…"}
+                      </button>
                     </div>
                   </>
                 )}

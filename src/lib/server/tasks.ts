@@ -1,6 +1,6 @@
-// Task operations behind the API routes — the web counterpart of the IPC
-// handlers in Largs Hub's electron/tasks.ts, with Notion in place of the local
-// store.
+// Task operations behind the API routes, against the visitor's own Notion
+// database. src/lib/localBackend.ts runs the same operations on the device for
+// visitors who keep their tasks locally.
 
 import {
   carryOverPending,
@@ -12,6 +12,7 @@ import {
   topOrder,
 } from "../tasksLogic";
 import type { TodoDaySummary, TodoTask } from "../types";
+import type { NotionConfig } from "./connection";
 import {
   archiveTask,
   createTask,
@@ -26,12 +27,16 @@ export { NotionError };
 
 const onDay = (date: string) => ({ property: "Date", date: { equals: date } });
 
-export const listDay = async (date: string) => sortTasks(await queryTasks(onDay(date)));
+export const listDay = async (config: NotionConfig, date: string) =>
+  sortTasks(await queryTasks(config, onDay(date)));
 
 // Writes one at a time: Notion rate-limits bursts, and the rows are few.
-async function applyPatches(patches: { id: string; patch: TaskPatch }[]): Promise<TodoTask[]> {
+async function applyPatches(
+  config: NotionConfig,
+  patches: { id: string; patch: TaskPatch }[],
+): Promise<TodoTask[]> {
   const updated: TodoTask[] = [];
-  for (const { id, patch } of patches) updated.push(await updateTask(id, patch));
+  for (const { id, patch } of patches) updated.push(await updateTask(config, id, patch));
   return updated;
 }
 
@@ -39,33 +44,37 @@ async function applyPatches(patches: { id: string; patch: TaskPatch }[]): Promis
 // today's list first moves every open task from an earlier day onto today —
 // the same sweep Largs Hub runs (issue #107), so whichever client opens today
 // first does it and the other finds nothing left to move.
-export async function carryIntoToday(today: string): Promise<string[]> {
-  const backlog = await queryTasks({
+export async function carryIntoToday(config: NotionConfig, today: string): Promise<string[]> {
+  const backlog = await queryTasks(config, {
     and: [
       { property: "Done", checkbox: { equals: false } },
       { property: "Date", date: { before: today } },
     ],
   });
   if (backlog.length === 0) return [];
-  const moves = carryOverPending(backlog, await listDay(today), today);
-  await applyPatches(moves.map((t) => ({ id: t.id, patch: { date: t.date, order: t.order } })));
+  const moves = carryOverPending(backlog, await listDay(config, today), today);
+  await applyPatches(
+    config,
+    moves.map((t) => ({ id: t.id, patch: { date: t.date, order: t.order } })),
+  );
   return moves.map((t) => t.id);
 }
 
-export async function listTasks(date: string, today: string) {
-  const carried = date === today ? await carryIntoToday(today) : [];
-  return { tasks: await listDay(date), carried };
+export async function listTasks(config: NotionConfig, date: string, today: string) {
+  const carried = date === today ? await carryIntoToday(config, today) : [];
+  return { tasks: await listDay(config, date), carried };
 }
 
 export async function calendar(
+  config: NotionConfig,
   from: string,
   to: string,
   today: string,
 ): Promise<Record<string, TodoDaySummary>> {
   // Swept first so an open task isn't counted as pending on a past day it is
   // about to leave
-  await carryIntoToday(today);
-  const tasks = await queryTasks({
+  await carryIntoToday(config, today);
+  const tasks = await queryTasks(config, {
     and: [
       { property: "Date", date: { on_or_after: from } },
       { property: "Date", date: { on_or_before: to } },
@@ -74,38 +83,69 @@ export async function calendar(
   return summarizeDays(tasks, from, to);
 }
 
-export async function create(date: string, text: string): Promise<TodoTask> {
+export async function create(config: NotionConfig, date: string, text: string) {
   // Newest first: a task you just typed is the one you're looking at, so it
   // lands above the day's existing list rather than under it.
-  const order = topOrder(await listDay(date), date);
-  return createTask({ text, done: false, date, order });
+  const order = topOrder(await listDay(config, date), date);
+  return createTask(config, { text, done: false, date, order });
 }
 
-export async function update(id: string, patch: { text?: string; done?: boolean }) {
-  return (await getTask(id)) ? updateTask(id, patch) : null;
+export async function update(
+  config: NotionConfig,
+  id: string,
+  patch: { text?: string; done?: boolean },
+) {
+  return (await getTask(config, id)) ? updateTask(config, id, patch) : null;
 }
 
 // Move a task onto another day, appended after whatever is already there —
 // the same landing spot the carry-over uses. Null when the task is gone.
-export async function move(id: string, toDate: string): Promise<TodoTask | null> {
-  const task = await getTask(id);
+export async function move(
+  config: NotionConfig,
+  id: string,
+  toDate: string,
+): Promise<TodoTask | null> {
+  const task = await getTask(config, id);
   if (!task) return null;
   if (task.date === toDate) return task;
-  const order = nextOrder(await listDay(toDate), toDate);
-  return updateTask(id, { date: toDate, order });
+  const order = nextOrder(await listDay(config, toDate), toDate);
+  return updateTask(config, id, { date: toDate, order });
 }
 
-export async function remove(id: string): Promise<void> {
-  if (await getTask(id)) await archiveTask(id);
+export async function remove(config: NotionConfig, id: string): Promise<void> {
+  if (await getTask(config, id)) await archiveTask(config, id);
 }
 
-export async function reorder(date: string, ids: string[]): Promise<TodoTask[]> {
-  const day = await listDay(date);
+// Copies tasks kept on a device into Notion when it connects, keeping each
+// one's day, place and done state. One at a time, and it reports which ones
+// made it even when a later one fails, so the device only drops the tasks
+// that are really in Notion and a retry doesn't create duplicates.
+export async function importTasks(
+  config: NotionConfig,
+  tasks: { id: string; text: string; done: boolean; date: string; order: number }[],
+): Promise<{ imported: string[]; error?: unknown }> {
+  const imported: string[] = [];
+  for (const { id, ...task } of tasks) {
+    try {
+      await createTask(config, task);
+    } catch (error) {
+      return { imported, error };
+    }
+    imported.push(id);
+  }
+  return { imported };
+}
+
+export async function reorder(config: NotionConfig, date: string, ids: string[]) {
+  const day = await listDay(config, date);
   const { tasks, changed } = reorderTasks(day, date, ids);
   const written = new Map(
-    (await applyPatches(changed.map((t) => ({ id: t.id, patch: { order: t.order } })))).map(
-      (t) => [t.id, t],
-    ),
+    (
+      await applyPatches(
+        config,
+        changed.map((t) => ({ id: t.id, patch: { order: t.order } })),
+      )
+    ).map((t) => [t.id, t]),
   );
   return tasksForDate(
     tasks.map((t) => written.get(t.id) ?? t),

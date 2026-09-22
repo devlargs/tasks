@@ -1,16 +1,19 @@
 ---
 import Layout from "../layouts/Layout.astro";
-import TodoApp from "../components/todo/TodoApp";
-import { NOTION_DATABASE_ID } from "astro:env/server";
+import TasksRoot from "../components/TasksRoot";
+import { readConnection } from "../lib/server/connection";
 import { notionDatabaseUrl } from "../lib/tasksLogic";
 
-// The list is per-device state (today's date, what's cached) all the way down,
-// so it renders in the browser only.
-const databaseUrl = notionDatabaseUrl(NOTION_DATABASE_ID);
+// Whether this device has connected Notion comes from its cookie, which the
+// page's scripts can't read. Everything else — today's date, what's cached,
+// tasks kept on the device — is per-device state, so the app renders in the
+// browser only.
+const connection = readConnection(Astro.cookies);
+const databaseUrl = connection ? notionDatabaseUrl(connection.databaseId) : null;
 ---
 
 <Layout title="Tasks">
   <div id="root">
-    <TodoApp client:only="react" databaseUrl={databaseUrl} />
+    <TasksRoot client:only="react" connected={connection !== null} databaseUrl={databaseUrl} />
   </div>
 </Layout>

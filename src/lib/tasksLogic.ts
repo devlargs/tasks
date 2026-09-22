@@ -139,11 +139,7 @@ export function reorderTasks(
 //
 // `backlog` is whatever open tasks exist before `toDate`; `onDay` is what's
 // already on it. Days compare as strings: YYYY-MM-DD sorts chronologically.
-export function carryOverPending(
-  backlog: Task[],
-  onDay: Task[],
-  toDate: string,
-): Task[] {
+export function carryOverPending(backlog: Task[], onDay: Task[], toDate: string): Task[] {
   const pending = backlog
     .filter((t) => !t.done && t.date < toDate)
     .sort(
@@ -157,6 +153,11 @@ export function carryOverPending(
 // --- Validation --------------------------------------------------------------
 
 export const MAX_TASK_TEXT = 500;
+
+// Tasks copied into Notion per request when a device connects. Small: each one
+// is a Notion write, and a request has to finish well inside the server
+// function's time limit.
+export const MAX_IMPORT_BATCH = 10;
 
 export function sanitizeTaskText(raw: unknown): string | null {
   if (typeof raw !== "string") return null;

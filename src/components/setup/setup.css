@@ -1,0 +1,279 @@
+/* Hallmark · component: first-run setup (choice + connect form) · genre: utilitarian
+ * theme: existing Catppuccin tokens (src/styles/global.css) · no new colours or fonts
+ * states: default · hover · focus · active · disabled · loading · error · success
+ * success is silent: a finished connect hands straight over to the list
+ * contrast: pass (40–41) · pre-emit critique: P4 H4 E5 S5 R5 V3
+ */
+
+.setup {
+  min-height: 100dvh;
+  display: grid;
+  place-items: start center;
+  padding: clamp(var(--space-xl), 12vh, var(--space-2xl)) var(--space-md) var(--space-xl);
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+.setup-inner {
+  width: min(100%, 26rem);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.setup-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.setup-title {
+  margin-top: var(--space-xs);
+  font-size: var(--text-display-s);
+  font-weight: 200;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+
+.setup-lede {
+  font-size: var(--text-md);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  text-wrap: pretty;
+}
+
+/* --- The two choices --------------------------------------------------- */
+
+.setup-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.setup-option {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  width: 100%;
+  padding: var(--space-md);
+  text-align: left;
+  color: inherit;
+  background: color-mix(in srgb, var(--panel) 45%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 10px;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-micro) var(--ease-out),
+    border-color var(--dur-micro) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .setup-option:hover {
+    background: color-mix(in srgb, var(--panel) 70%, var(--surface));
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  }
+}
+
+.setup-option:active {
+  transform: translateY(1px);
+}
+
+.setup-option-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.setup-option-body {
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* --- The Notion form --------------------------------------------------- */
+
+.setup-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.setup-form-title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.setup-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  min-width: 0;
+}
+
+.setup-field label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.setup-field input {
+  height: 44px;
+  width: 100%;
+  min-width: 0;
+  padding: 0 var(--space-sm);
+  /* 16px keeps iOS from zooming in on focus */
+  font-size: 16px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--panel) 70%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 8px;
+  outline: none;
+  transition: background-color var(--dur-micro) var(--ease-out);
+}
+
+.setup-field input::placeholder {
+  color: var(--text-muted);
+}
+
+@media (hover: hover) {
+  .setup-field input:hover {
+    background: var(--panel);
+  }
+}
+
+.setup-field input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.setup-field input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.setup-help {
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.setup-help summary {
+  width: fit-content;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.setup-help ol {
+  margin-top: var(--space-xs);
+  padding-left: 1.25rem;
+  list-style: decimal;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.setup-help strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.setup-help a,
+.setup-help summary {
+  text-underline-offset: 2px;
+}
+
+.setup-help a {
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+.setup-note {
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  /* --text-muted is under 4.5:1 at this size in both themes */
+  color: var(--text-secondary);
+}
+
+/* One line reserved, so an error doesn't push the buttons down */
+.setup-message {
+  min-height: 1lh;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--danger);
+}
+
+.setup-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.setup-button {
+  height: 44px;
+  padding: 0 var(--space-lg);
+  font-size: var(--text-md);
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+  border-radius: 8px;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-micro) var(--ease-out),
+    opacity var(--dur-micro) var(--ease-out);
+}
+
+.setup-button-primary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--surface);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+@media (hover: hover) {
+  .setup-button:hover:not(:disabled) {
+    background: var(--sidebar-hover);
+  }
+
+  .setup-button-primary:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--accent) 88%, var(--text-primary));
+  }
+}
+
+.setup-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.setup-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Loading: the label says what's happening; the button just stays put */
+.setup-button[aria-busy="true"] {
+  opacity: 0.8;
+  cursor: progress;
+}
+
+.setup-option:focus-visible,
+.setup-button:focus-visible,
+.setup-help summary:focus-visible,
+.setup-help a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-option,
+  .setup-button,
+  .setup-field input {
+    transition: none;
+  }
+
+  .setup-option:active,
+  .setup-button:active:not(:disabled) {
+    transform: none;
+  }
+}

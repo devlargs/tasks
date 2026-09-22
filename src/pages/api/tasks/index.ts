@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { fail, ok, readJson, withNotion } from "../../../lib/server/http";
+import { clockFrom, fail, ok, readJson, withNotion } from "../../../lib/server/http";
 import { create, listTasks } from "../../../lib/server/tasks";
 import { isPlausibleToday, isRealDate, sanitizeTaskText } from "../../../lib/tasksLogic";
 
@@ -10,7 +10,8 @@ export const GET: APIRoute = ({ url, cookies }) =>
     const today = url.searchParams.get("today");
     if (!isRealDate(date)) return fail("Invalid date.");
     if (!isPlausibleToday(today, new Date())) return fail("Your device's date looks wrong.");
-    return ok(await listTasks(config, date, today));
+    const clock = clockFrom(url.searchParams.get("now"), url.searchParams.get("tz"));
+    return ok(await listTasks(config, date, today, clock));
   });
 
 export const POST: APIRoute = ({ request, cookies }) =>

@@ -88,6 +88,8 @@ export default function TodoCalendar({ api, selectedDate, onPickDay, onClose }: 
               >
                 <span className="todo-figure">{totals.done}</span> done
                 {" · "}
+                <span className="todo-figure">{totals.inProgress}</span> in progress
+                {" · "}
                 <span className="todo-figure">{totals.pending}</span> pending
               </p>
             </div>
@@ -200,6 +202,12 @@ export default function TodoCalendar({ api, selectedDate, onPickDay, onClose }: 
                         <span className="todo-figure">{day.done}</span>
                       </span>
                     ) : null}
+                    {day?.inProgress ? (
+                      <span className="todo-cal-count" title={`${day.inProgress} in progress`}>
+                        <span className="todo-cal-dot todo-cal-dot-progress" />
+                        <span className="todo-figure">{day.inProgress}</span>
+                      </span>
+                    ) : null}
                     {day?.pending ? (
                       <span className="todo-cal-count" title={`${day.pending} pending`}>
                         <span className="todo-cal-dot todo-cal-dot-pending" />
@@ -216,6 +224,10 @@ export default function TodoCalendar({ api, selectedDate, onPickDay, onClose }: 
             <span className="todo-cal-count">
               <span className="todo-cal-dot todo-cal-dot-done" />
               Done
+            </span>
+            <span className="todo-cal-count">
+              <span className="todo-cal-dot todo-cal-dot-progress" />
+              In progress
             </span>
             <span className="todo-cal-count">
               <span className="todo-cal-dot todo-cal-dot-pending" />

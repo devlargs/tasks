@@ -107,13 +107,23 @@
 /* --- Progress: the head's bottom edge ------------------------------------ */
 
 .todo-progress-track {
+  display: flex;
   height: 2px;
   background: color-mix(in srgb, var(--border) 55%, transparent);
 }
 
 .todo-progress-fill {
+  flex-shrink: 0;
   height: 100%;
   background: var(--accent);
+  transition: width var(--dur-long) var(--ease-out);
+}
+
+/* In progress: the same accent, tinted, right after the done share */
+.todo-progress-started {
+  flex-shrink: 0;
+  height: 100%;
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
   transition: width var(--dur-long) var(--ease-out);
 }
 
@@ -196,6 +206,49 @@
 
 .todo-check-on .todo-check-tick {
   stroke-dashoffset: 0;
+}
+
+/* In progress: a small filled square, half-way between empty and ticked */
+.todo-check-half {
+  fill: var(--accent);
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(0);
+  transition: transform var(--dur-short) var(--ease-out);
+}
+
+.todo-check-progress .todo-check-half {
+  transform: scale(0.5);
+}
+
+/* --- Running time on an In Progress row -------------------------------- */
+
+.todo-running {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.todo-running-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  animation: todo-running-pulse 2.4s var(--ease-in-out) infinite;
+}
+
+@keyframes todo-running-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
 }
 
 @keyframes todo-spring {
@@ -331,6 +384,27 @@
 
 .todo-done-caret-open {
   transform: rotate(0deg);
+}
+
+/* In Progress and Todo headings: the Done toggle's voice, without the caret
+   or the hover, since they don't open or close anything */
+.todo-section-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+  padding: var(--space-sm);
+  margin-top: var(--space-2xs);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  color: var(--text-secondary);
+  border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
+}
+
+/* At the top of the list there's nothing above to separate it from */
+.todo-section-head-first {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 0;
 }
 
 .todo-done-count {
@@ -524,6 +598,12 @@
 /* Hollow: pending is work not yet filled in */
 .todo-cal-dot-pending {
   border: 1.5px solid var(--warning);
+}
+
+/* Half-filled: in progress sits between the two */
+.todo-cal-dot-progress {
+  border: 1.5px solid var(--accent);
+  background: linear-gradient(90deg, var(--accent) 50%, transparent 50%);
 }
 
 .todo-cal-legend {
@@ -728,6 +808,8 @@
   .todo-composer,
   .todo-composer-hint,
   .todo-progress-fill,
+  .todo-progress-started,
+  .todo-check-half,
   .todo-cal-day,
   .todo-picker-nav,
   .todo-picker-day {
@@ -748,6 +830,7 @@
   .todo-day-prev,
   .todo-done-list,
   .todo-pill-syncing,
+  .todo-running-dot,
   .todo-picker {
     animation: none !important;
   }
@@ -822,8 +905,15 @@
 
 .todo-stats-tiles {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--space-md);
+}
+
+/* Four figures don't fit a phone's width in one row */
+@container todo (max-width: 30rem) {
+  .todo-stats-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .todo-stats-tile dt {
@@ -879,6 +969,19 @@
   background: var(--chart-done);
 }
 
+/* Started is the done hue as an outline: identity by form as well as colour */
+.todo-stats-swatch-started {
+  width: 12px;
+  border: 1.5px solid var(--chart-done);
+  background: color-mix(in srgb, var(--chart-done) 14%, transparent);
+}
+
+.todo-stats-key-started {
+  height: 6px;
+  border: 1.5px solid var(--chart-done);
+  background: transparent;
+}
+
 .todo-stats-swatch-carried,
 .todo-stats-key-carried {
   background: var(--chart-carried);
@@ -931,12 +1034,21 @@
   fill: var(--chart-carried);
 }
 
+.todo-stats-bar-started {
+  fill: color-mix(in srgb, var(--chart-done) 14%, transparent);
+  stroke: var(--chart-done);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.todo-stats-bar-started,
 .todo-stats-bar-done,
 .todo-stats-bar-carried {
   transition: opacity var(--dur-micro) var(--ease-out);
 }
 
 /* Hovering one day quiets the rest, so the one you're reading stands out */
+.todo-stats-dim .todo-stats-bar-started,
 .todo-stats-dim .todo-stats-bar-done,
 .todo-stats-dim .todo-stats-bar-carried {
   opacity: 0.35;
@@ -1034,6 +1146,7 @@
 @media (prefers-reduced-motion: reduce) {
   .todo-stats-body,
   .todo-stats-range-option,
+  .todo-stats-bar-started,
   .todo-stats-bar-done,
   .todo-stats-bar-carried {
     transition: none;

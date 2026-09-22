@@ -1,23 +1,37 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import {
   MdDragIndicator,
   MdOutlineArrowForward,
   MdOutlineDeleteOutline,
   MdOutlineEditCalendar,
+  MdOutlineUndo,
 } from "react-icons/md";
-import type { TodoTask } from "../../lib/types";
+import { formatInstant, totalSeconds } from "../../lib/tasksLogic";
+import type { TaskStatus, TodoTask } from "../../lib/types";
 import { buildDissolveWords } from "./dissolve";
+import { elapsedPrecise, elapsedWords, formatElapsed, isoDuration } from "./elapsed";
 import { parseTaskSegments } from "./links";
 import SchedulePicker from "./SchedulePicker";
+import { useTicker } from "./ticker";
 
 interface TaskRowProps {
   task: TodoTask;
-  // The task has just been checked and its label is dissolving away. The row
+  // The task has just been finished and its label is dissolving away. The row
   // still reads as done for the whole animation, so the tick doesn't wait.
   dissolving: boolean;
   // Done rows sit in their own section and aren't part of the manual order
   reorderable: boolean;
+  // The checkbox moves the task one step on: Todo starts it, In Progress
+  // finishes it, and Done puts it back in progress
   onToggle: () => void;
+  // Puts an In Progress task back in Todo. Absent on every other row.
+  onBack?: () => void;
   onRename: (text: string) => void;
   // Push the task onto the next day. Absent for done rows — finished work has
   // no tomorrow.
@@ -33,11 +47,47 @@ interface TaskRowProps {
   dropTarget: boolean;
 }
 
+// What the checkbox does from each state, for its name and tooltip
+const CHECK_LABEL: Record<TaskStatus, string> = {
+  todo: "Start this task",
+  inProgress: "Mark as done",
+  done: "Move back to In Progress",
+};
+
+// A tri-state box: Todo is unticked, In Progress half-way, Done ticked
+const CHECKED: Record<TaskStatus, "false" | "mixed" | "true"> = {
+  todo: "false",
+  inProgress: "mixed",
+  done: "true",
+};
+
+// The time an In Progress task has run, all days included. Always worked out
+// from the banked log and the open run, never counted up in state, so a reload
+// shows the same figure.
+function RunningTime({ task }: { task: TodoTask }) {
+  const now = useTicker();
+  const seconds = totalSeconds(task, formatInstant(now, 0));
+  return (
+    <span className="todo-running shrink-0">
+      {task.runningSince && <span className="todo-running-dot" aria-hidden />}
+      <time
+        className="todo-figure"
+        dateTime={isoDuration(seconds)}
+        title={`${elapsedPrecise(seconds)} worked on this task`}
+        aria-label={`Running for ${elapsedWords(seconds)}`}
+      >
+        {formatElapsed(seconds)}
+      </time>
+    </span>
+  );
+}
+
 export default function TaskRow({
   task,
   dissolving,
   reorderable,
   onToggle,
+  onBack,
   onRename,
   onDefer,
   onSchedule,
@@ -83,7 +133,9 @@ export default function TaskRow({
 
   // Checked reads true for the whole dissolve, so the tick draws itself in
   // while the letters are still going rather than after them.
-  const checked = task.done || dissolving;
+  const status: TaskStatus = dissolving ? "done" : task.status;
+  const checked = status === "done";
+  const inProgress = status === "inProgress";
 
   const labelStyle = {
     fontSize: "var(--text-md)",
@@ -104,6 +156,8 @@ export default function TaskRow({
   return (
     <div
       data-drop-id={reorderable ? task.id : undefined}
+      // A row only takes drops from its own section
+      data-drop-section={reorderable ? task.status : undefined}
       onAnimationEnd={() => setSpringing(false)}
       className={[
         "todo-row flex items-start",
@@ -134,30 +188,34 @@ export default function TaskRow({
         <span className="shrink-0" style={{ width: 16 }} />
       )}
 
-      {/* Checkbox — the tick draws itself in */}
+      {/* Checkbox — half-filled while in progress; the tick draws itself in */}
       <button
         onClick={() => {
           setSpringing(true);
           onToggle();
         }}
         disabled={dissolving}
+        role="checkbox"
+        aria-checked={CHECKED[status]}
         className={`todo-check shrink-0 flex items-center justify-center rounded-md cursor-pointer ${
           checked ? "todo-check-on" : ""
-        }`}
+        } ${inProgress ? "todo-check-progress" : ""}`}
         style={{
           width: 19,
           height: 19,
           marginTop: 1,
           background: checked ? "var(--accent)" : "transparent",
           border: `1.5px solid ${
-            checked ? "var(--accent)" : "color-mix(in srgb, var(--border) 90%, transparent)"
+            checked || inProgress
+              ? "var(--accent)"
+              : "color-mix(in srgb, var(--border) 90%, transparent)"
           }`,
         }}
-        aria-label={checked ? "Mark as not done" : "Mark as done"}
-        title={checked ? "Mark as not done" : "Mark as done"}
-        aria-pressed={checked}
+        aria-label={CHECK_LABEL[status]}
+        title={CHECK_LABEL[status]}
       >
         <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect className="todo-check-half" x={5} y={5} width={14} height={14} rx={2.5} />
           <path
             className="todo-check-tick"
             d="M5 12.5l4.5 4.5L19 7.5"
@@ -261,7 +319,23 @@ export default function TaskRow({
             )}
           </span>
         )}
+        {/* Under the label rather than beside it, so it never takes width
+            from the text on a narrow screen */}
+        {inProgress && !editing && <RunningTime task={task} />}
       </div>
+
+      {onBack && (
+        <button
+          onClick={onBack}
+          disabled={dissolving}
+          className="todo-row-action shrink-0 flex items-center justify-center rounded-md cursor-pointer hover:bg-sidebar-hover"
+          style={{ ...actionStyle, color: "var(--text-muted)" }}
+          aria-label="Move back to Todo"
+          title="Move back to Todo"
+        >
+          <MdOutlineUndo size={16} />
+        </button>
+      )}
 
       {onSchedule && (
         <button

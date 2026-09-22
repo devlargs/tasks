@@ -35,10 +35,11 @@ export function monthGrid(month: string): string[] {
 
 // The month's own totals; the neighbouring days padding the grid don't count.
 export function monthTotals(days: Record<string, TodoDaySummary>, month: string): TodoDaySummary {
-  const totals = { done: 0, pending: 0 };
+  const totals = { done: 0, inProgress: 0, pending: 0 };
   for (const [key, day] of Object.entries(days)) {
     if (!inMonth(key, month)) continue;
     totals.done += day.done;
+    totals.inProgress += day.inProgress;
     totals.pending += day.pending;
   }
   return totals;
@@ -54,6 +55,6 @@ export function weekdayLabels(style: "short" | "narrow"): string[] {
 
 // The counts half of a day cell's accessible name.
 export function summaryPhrase(day: TodoDaySummary | undefined): string {
-  if (!day || (day.done === 0 && day.pending === 0)) return "no tasks";
-  return `${day.done} done, ${day.pending} pending`;
+  if (!day || (day.done === 0 && day.inProgress === 0 && day.pending === 0)) return "no tasks";
+  return `${day.done} done, ${day.inProgress} in progress, ${day.pending} pending`;
 }

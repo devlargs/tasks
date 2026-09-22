@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { fail, ok, readJson, withNotion } from "../../../../lib/server/http";
+import { clockFrom, fail, ok, readJson, withNotion } from "../../../../lib/server/http";
 import { move } from "../../../../lib/server/tasks";
 import { isPageId, isPlausibleToday, isSchedulableDate } from "../../../../lib/tasksLogic";
 
@@ -11,6 +11,6 @@ export const POST: APIRoute = ({ params, request, cookies }) =>
     const body = await readJson(request);
     if (!isPlausibleToday(body.today, new Date())) return fail("Your device's date looks wrong.");
     if (!isSchedulableDate(body.date, body.today)) return fail("Pick today or a later day.");
-    const task = await move(config, params.id, body.date, body.today);
+    const task = await move(config, params.id, body.date, body.today, clockFrom(body.now, body.tz));
     return task ? ok({ task }) : fail("Task not found.", 404);
   });

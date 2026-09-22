@@ -3,6 +3,8 @@
 // day, not a UTC one — which is why the browser, not the server, says what
 // "today" is.
 
+import { formatInstant, type ZoneOffset } from "../../lib/tasksLogic";
+
 export function dateKey(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
@@ -10,6 +12,26 @@ export function dateKey(date: Date): string {
 
 export function todayKey(): string {
   return dateKey(new Date());
+}
+
+// The browser's own calendar: its UTC offset at any instant, DST included
+export const deviceZone: ZoneOffset = (ms) => -new Date(ms).getTimezoneOffset();
+
+// This moment with the device's offset, 2026-09-23T14:05:00+08:00 — the form
+// the server needs to file time under the device's days, not its own UTC ones.
+export function nowIso(): string {
+  const ms = Date.now();
+  return formatInstant(ms, deviceZone(ms));
+}
+
+// The device's time zone by name, so the server can follow it across a DST
+// change. Empty when the browser won't say.
+export function deviceTimeZone(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
+  } catch {
+    return "";
+  }
 }
 
 export function shiftDateKey(key: string, days: number): string {

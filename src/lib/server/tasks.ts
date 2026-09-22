@@ -3,7 +3,9 @@
 // visitors who keep their tasks locally.
 
 import {
+  bankElapsed,
   carryOverPending,
+  changeStatus,
   isCarry,
   logCarry,
   summarizeStats,
@@ -13,8 +15,9 @@ import {
   summarizeDays,
   tasksForDate,
   topOrder,
+  type DeviceClock,
 } from "../tasksLogic";
-import type { TodoDaySummary, TodoTask } from "../types";
+import type { TaskUpdate, TodoDaySummary, TodoTask } from "../types";
 import type { NotionConfig } from "./connection";
 import {
   archiveTask,
@@ -22,7 +25,9 @@ import {
   getTask,
   NotionError,
   queryTasks,
+  timeFields,
   updateTask,
+  type NewTask,
   type TaskPatch,
 } from "./notion";
 
@@ -47,7 +52,15 @@ async function applyPatches(
 // today's list first moves every open task from an earlier day onto today —
 // the same sweep Largs Hub runs (issue #107), so whichever client opens today
 // first does it and the other finds nothing left to move.
-export async function carryIntoToday(config: NotionConfig, today: string): Promise<string[]> {
+//
+// The Done = false filter catches both open states, since the checkbox is
+// written with every status. A task In Progress arrives still In Progress,
+// with the time it ran on the days it left banked under those days.
+export async function carryIntoToday(
+  config: NotionConfig,
+  today: string,
+  clock: DeviceClock,
+): Promise<string[]> {
   const backlog = await queryTasks(config, {
     and: [
       { property: "Done", checkbox: { equals: false } },
@@ -55,19 +68,29 @@ export async function carryIntoToday(config: NotionConfig, today: string): Promi
     ],
   });
   if (backlog.length === 0) return [];
-  const moves = carryOverPending(backlog, await listDay(config, today), today);
+  const moves = carryOverPending(backlog, await listDay(config, today), today, clock);
   await applyPatches(
     config,
     moves.map((t) => ({
       id: t.id,
-      patch: { date: t.date, order: t.order, carriedFrom: t.carriedFrom },
+      patch: {
+        date: t.date,
+        order: t.order,
+        carriedFrom: t.carriedFrom,
+        ...(t.status === "inProgress" ? timeFields(t) : {}),
+      },
     })),
   );
   return moves.map((t) => t.id);
 }
 
-export async function listTasks(config: NotionConfig, date: string, today: string) {
-  const carried = date === today ? await carryIntoToday(config, today) : [];
+export async function listTasks(
+  config: NotionConfig,
+  date: string,
+  today: string,
+  clock: DeviceClock,
+) {
+  const carried = date === today ? await carryIntoToday(config, today, clock) : [];
   return { tasks: await listDay(config, date), carried };
 }
 
@@ -76,10 +99,11 @@ export async function calendar(
   from: string,
   to: string,
   today: string,
+  clock: DeviceClock,
 ): Promise<Record<string, TodoDaySummary>> {
   // Swept first so an open task isn't counted as pending on a past day it is
   // about to leave
-  await carryIntoToday(config, today);
+  await carryIntoToday(config, today, clock);
   const tasks = await queryTasks(config, {
     and: [
       { property: "Date", date: { on_or_after: from } },
@@ -93,15 +117,29 @@ export async function create(config: NotionConfig, date: string, text: string) {
   // Newest first: a task you just typed is the one you're looking at, so it
   // lands above the day's existing list rather than under it.
   const order = topOrder(await listDay(config, date), date);
-  return createTask(config, { text, done: false, date, order });
+  return createTask(config, { text, status: "todo", date, order });
 }
 
+// Renames a task and/or moves it between Todo, In Progress and Done. A status
+// change also runs the clock and finds the task its place in the day (see
+// changeStatus), worked out here from what Notion holds rather than trusted
+// from the browser. Null when the task is gone.
 export async function update(
   config: NotionConfig,
   id: string,
-  patch: { text?: string; done?: boolean },
-) {
-  return (await getTask(config, id)) ? updateTask(config, id, patch) : null;
+  change: TaskUpdate,
+  clock: DeviceClock,
+): Promise<TodoTask | null> {
+  const task = await getTask(config, id);
+  if (!task) return null;
+  const patch: TaskPatch = { text: change.text };
+  if (change.status !== undefined && change.status !== task.status) {
+    // Only picking up and putting back move a task within its day
+    const day = change.status === "done" ? [] : await listDay(config, task.date);
+    const next = changeStatus(task, change.status, day, clock.now, clock.zone);
+    Object.assign(patch, { status: next.status, order: next.order }, timeFields(next));
+  }
+  return updateTask(config, id, patch);
 }
 
 // Move a task onto another day, appended after whatever is already there —
@@ -111,6 +149,7 @@ export async function move(
   id: string,
   toDate: string,
   today: string,
+  clock: DeviceClock,
 ): Promise<TodoTask | null> {
   const task = await getTask(config, id);
   if (!task) return null;
@@ -120,14 +159,22 @@ export async function move(
   const carriedFrom = isCarry(task, toDate, today)
     ? logCarry(task, task.date).carriedFrom
     : undefined;
-  return updateTask(config, id, { date: toDate, order, carriedFrom });
+  // A running task keeps running; its time so far is banked on the way
+  const running = task.runningSince ? timeFields(bankElapsed(task, clock.now, clock.zone)) : {};
+  return updateTask(config, id, { date: toDate, order, carriedFrom, ...running });
 }
 
-// Done and carried-over counts per day, for the statistics view. Every task
-// carried off a day in the range now sits on or after `from`, so one query
-// from there on finds them all.
-export async function stats(config: NotionConfig, from: string, to: string, today: string) {
-  await carryIntoToday(config, today);
+// Done, started and carried-over counts per day, for the statistics view.
+// Every task carried off or started on a day in the range now sits on or
+// after `from`, so one query from there on finds them all.
+export async function stats(
+  config: NotionConfig,
+  from: string,
+  to: string,
+  today: string,
+  clock: DeviceClock,
+) {
+  await carryIntoToday(config, today, clock);
   const tasks = await queryTasks(config, { property: "Date", date: { on_or_after: from } });
   return summarizeStats(tasks, from, to);
 }
@@ -137,19 +184,13 @@ export async function remove(config: NotionConfig, id: string): Promise<void> {
 }
 
 // Copies tasks kept on a device into Notion when it connects, keeping each
-// one's day, place and done state. One at a time, and it reports which ones
-// made it even when a later one fails, so the device only drops the tasks
-// that are really in Notion and a retry doesn't create duplicates.
+// one's day, place, status, logs and running clock. One at a time, and it
+// reports which ones made it even when a later one fails, so the device only
+// drops the tasks that are really in Notion and a retry doesn't create
+// duplicates.
 export async function importTasks(
   config: NotionConfig,
-  tasks: {
-    id: string;
-    text: string;
-    done: boolean;
-    date: string;
-    order: number;
-    carriedFrom?: string[];
-  }[],
+  tasks: (NewTask & { id: string })[],
 ): Promise<{ imported: string[]; error?: unknown }> {
   const imported: string[] = [];
   for (const { id, ...task } of tasks) {

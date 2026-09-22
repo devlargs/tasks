@@ -18,12 +18,21 @@ import {
   MdRefresh,
 } from "react-icons/md";
 import type { TaskBackend } from "../../lib/api";
-import type { TodoTask } from "../../lib/types";
+import { changeStatus, restoreTask } from "../../lib/tasksLogic";
+import { carryTrackingSince, pickupTrackingSince } from "../../lib/tracking";
+import type { TaskStatus, TodoTask } from "../../lib/types";
 import { dissolveDurationMs } from "./dissolve";
 import TaskRow from "./TaskRow";
 import TodoCalendar from "./TodoCalendar";
 import TodoStats from "./TodoStats";
-import { formatDayLabel, formatFullDate, shiftDateKey, todayKey } from "./dates";
+import {
+  deviceZone,
+  formatDayLabel,
+  formatFullDate,
+  nowIso,
+  shiftDateKey,
+  todayKey,
+} from "./dates";
 import "./todo.css";
 
 // The daily list. Tasks live in the device's Notion database or on the device
@@ -51,11 +60,23 @@ const CACHE_MAX_DAYS = 60;
 
 type CachedDay = { tasks: TodoTask[]; at: number };
 
+// Every cached task goes through restoreTask, as stored ones do: a copy from
+// before In Progress existed has no status, and must land in the right section
+// (and show no clock) from the first frame, not after the fresh read.
 function restoreCache(): Map<string, CachedDay> {
   try {
     const raw = localStorage.getItem(CACHE_STORAGE_KEY);
-    const entries = raw ? (JSON.parse(raw) as [string, CachedDay][]) : [];
-    return new Map(Array.isArray(entries) ? entries : []);
+    const entries = raw ? (JSON.parse(raw) as unknown) : [];
+    if (!Array.isArray(entries)) return new Map();
+    const days = new Map<string, CachedDay>();
+    for (const entry of entries as unknown[]) {
+      if (!Array.isArray(entry) || typeof entry[0] !== "string") continue;
+      const cached = entry[1] as Partial<CachedDay> | null;
+      if (!cached || !Array.isArray(cached.tasks) || typeof cached.at !== "number") continue;
+      const tasks = cached.tasks.map(restoreTask).filter((t): t is TodoTask => t !== null);
+      days.set(entry[0], { tasks, at: cached.at });
+    }
+    return days;
   } catch {
     return new Map();
   }
@@ -101,6 +122,13 @@ const byOrder = (tasks: TodoTask[]): TodoTask[] => [...tasks].sort((a, b) => a.o
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+// Which way the checkbox moves a task
+const NEXT_STATUS: Record<TaskStatus, TaskStatus> = {
+  todo: "inProgress",
+  inProgress: "done",
+  done: "inProgress",
+};
+
 // Near the top or bottom of the list, a drag scrolls it along
 const DRAG_SCROLL_EDGE = 48;
 const DRAG_SCROLL_STEP = 12;
@@ -135,6 +163,9 @@ export default function TodoApp({
   const [showDone, setShowDone] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+  // A row whose checkbox had focus when its task changed section; the focus
+  // follows it to where it lands
+  const refocusId = useRef<string | null>(null);
 
   const composerRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -151,10 +182,21 @@ export default function TodoApp({
   const reloadWanted = useRef(false);
 
   const ordered = useMemo(() => byOrder(tasks), [tasks]);
-  const openTasks = useMemo(() => ordered.filter((t) => !t.done), [ordered]);
-  const doneTasks = useMemo(() => ordered.filter((t) => t.done), [ordered]);
+  const progressTasks = useMemo(() => ordered.filter((t) => t.status === "inProgress"), [ordered]);
+  const todoTasks = useMemo(() => ordered.filter((t) => t.status === "todo"), [ordered]);
+  const doneTasks = useMemo(() => ordered.filter((t) => t.status === "done"), [ordered]);
   const doneCount = doneTasks.length;
+  const openCount = progressTasks.length + todoTasks.length;
   const progress = ordered.length === 0 ? 0 : doneCount / ordered.length;
+  const started = ordered.length === 0 ? 0 : progressTasks.length / ordered.length;
+
+  // Pickups and time are recorded from the first day this device runs a
+  // version that records them; the Progress view needs to know which day that
+  // was, even if it's opened weeks later.
+  useEffect(() => {
+    carryTrackingSince(todayKey());
+    pickupTrackingSince(todayKey());
+  }, []);
 
   // --- loading ---------------------------------------------------------------
 
@@ -256,9 +298,15 @@ export default function TodoApp({
 
   // --- animation helpers -----------------------------------------------------
 
-  // FLIP: rows that moved (a task sinking after being checked, neighbours
-  // closing a gap) slide from where they were instead of jumping.
+  // FLIP: rows that moved (a task picked up and rising into In Progress, one
+  // put back, neighbours closing a gap) slide from where they were instead of
+  // jumping.
   useLayoutEffect(() => {
+    const refocus = refocusId.current;
+    if (refocus) {
+      refocusId.current = null;
+      rowRefs.current.get(refocus)?.querySelector<HTMLElement>(".todo-check")?.focus();
+    }
     const reduce = prefersReducedMotion();
     const seen = new Set<string>();
     for (const [id, el] of rowRefs.current) {
@@ -276,7 +324,7 @@ export default function TodoApp({
     for (const id of [...prevRects.current.keys()]) {
       if (!seen.has(id)) prevRects.current.delete(id);
     }
-  }, [openTasks, doneTasks, showDone]);
+  }, [progressTasks, todoTasks, doneTasks, showDone]);
 
   // Collapse a row to nothing before it leaves the list, so the gap closes
   // instead of snapping shut.
@@ -359,6 +407,7 @@ export default function TodoApp({
     const optimistic: TodoTask = {
       id: tempId,
       text,
+      status: "todo",
       done: false,
       date: targetDate,
       order,
@@ -386,20 +435,35 @@ export default function TodoApp({
     });
   }, [api, draft, date, tasks, write]);
 
-  const handleToggle = useCallback(
-    async (task: TodoTask) => {
+  // Todo → In Progress → Done, and back. The clock and the task's place in
+  // the day follow the same rules the backends apply (changeStatus), so the
+  // row lands where the saved copy will put it.
+  const handleStatus = useCallback(
+    async (task: TodoTask, status: TaskStatus) => {
       // The write goes out first — the animation is presentation, and a task
       // must never be lost because a frame was dropped.
-      const request = withId(task.id, (id) => api.update(id, { done: !task.done }));
-      // Checking a task dissolves its letters, then closes the gap it leaves.
-      // Un-checking is the plain state change: nothing is going away.
-      if (!task.done && !prefersReducedMotion()) {
-        setDissolvingId(task.id);
-        await wait(dissolveDurationMs([...task.text].length));
-        await collapseRow(task.id);
-        setDissolvingId(null);
+      const request = withId(task.id, (id) => api.update(id, { status }));
+      // Finishing a task dissolves its letters, then closes the gap it leaves.
+      // Every other change is a move: the row travels to its new section.
+      if (status === "done") {
+        if (!prefersReducedMotion()) {
+          setDissolvingId(task.id);
+          await wait(dissolveDurationMs([...task.text].length));
+          await collapseRow(task.id);
+          setDissolvingId(null);
+        }
+      } else if (rowRefs.current.get(task.id)?.contains(document.activeElement)) {
+        refocusId.current = task.id;
       }
-      setTasks((current) => current.map((t) => (t.id === task.id ? { ...t, done: !t.done } : t)));
+      const now = nowIso();
+      setTasks((current) => {
+        const live = current.find((t) => t.id === task.id);
+        if (!live) return current;
+        const next = changeStatus(live, status, current, now, deviceZone);
+        return current.map((t) => (t.id === task.id ? next : t));
+      });
+      // A failed write re-reads the day (see write), which puts the row back
+      // where it was saved and takes away a clock that never started.
       await request;
     },
     [api, withId, collapseRow],
@@ -440,7 +504,9 @@ export default function TodoApp({
 
   // --- drag to reorder -------------------------------------------------------
 
-  const dragState = useRef<{ id: string; target: string | null } | null>(null);
+  // A drag stays inside its own section: the buttons, not a drop, are how a
+  // task changes state.
+  const dragState = useRef<{ id: string; section: TaskStatus; target: string | null } | null>(null);
 
   const finishDrag = useCallback(() => {
     const drag = dragState.current;
@@ -448,14 +514,22 @@ export default function TodoApp({
     setDraggingId(null);
     setDropTargetId(null);
     if (!drag?.target || drag.target === drag.id) return;
+    const idsOf = (list: TodoTask[]) => list.map((t) => t.id);
+    const section = idsOf(drag.section === "inProgress" ? progressTasks : todoTasks);
+    if (!section.includes(drag.id) || !section.includes(drag.target)) return;
     // Pull the dragged id out first, then look up the target's index — doing
     // it the other way round is off by one whenever it moves downwards.
-    const ids = openTasks.map((t) => t.id);
-    const [moved] = ids.splice(ids.indexOf(drag.id), 1);
-    ids.splice(ids.indexOf(drag.target), 0, moved);
-    // Done tasks aren't draggable but still hold positions in the day, so they
-    // ride along on the end rather than being dropped from the order.
-    ids.push(...doneTasks.map((t) => t.id));
+    const [moved] = section.splice(section.indexOf(drag.id), 1);
+    section.splice(section.indexOf(drag.target), 0, moved);
+    // The whole day goes back, In Progress ahead of Todo, so the numbering
+    // keeps the sections in that order. Done tasks aren't draggable but still
+    // hold positions in the day, so they ride along on the end rather than
+    // being dropped from the order.
+    const ids =
+      drag.section === "inProgress"
+        ? [...section, ...idsOf(todoTasks)]
+        : [...idsOf(progressTasks), ...section];
+    ids.push(...idsOf(doneTasks));
     // Reflect the new order locally so the rows settle before the round trip
     setTasks((current) =>
       current.map((t) => (ids.includes(t.id) ? { ...t, order: ids.indexOf(t.id) } : t)),
@@ -468,13 +542,13 @@ export default function TodoApp({
         realIds.filter((id): id is string => id !== null),
       );
     });
-  }, [api, openTasks, doneTasks, date, write, resolveId]);
+  }, [api, progressTasks, todoTasks, doneTasks, date, write, resolveId]);
 
-  const startDrag = useCallback((taskId: string, e: ReactPointerEvent) => {
+  const startDrag = useCallback((task: TodoTask, e: ReactPointerEvent) => {
     if (e.button !== 0) return;
     e.preventDefault();
-    dragState.current = { id: taskId, target: null };
-    setDraggingId(taskId);
+    dragState.current = { id: task.id, section: task.status, target: null };
+    setDraggingId(task.id);
 
     const onMove = (ev: PointerEvent) => {
       const drag = dragState.current;
@@ -482,7 +556,10 @@ export default function TodoApp({
       const row = document
         .elementFromPoint(ev.clientX, ev.clientY)
         ?.closest<HTMLElement>("[data-drop-id]");
-      drag.target = row?.dataset.dropId ?? drag.target;
+      // A row in the other section isn't a place this one can go
+      if (row && row.dataset.dropSection === drag.section) {
+        drag.target = row.dataset.dropId ?? drag.target;
+      }
       setDropTargetId(drag.target);
       const scroller = scrollRef.current;
       if (scroller) {
@@ -608,12 +685,13 @@ export default function TodoApp({
         task={task}
         dissolving={dissolvingId === task.id}
         reorderable={reorderable}
-        onToggle={() => void handleToggle(task)}
+        onToggle={() => void handleStatus(task, NEXT_STATUS[task.status])}
+        onBack={task.status === "inProgress" ? () => void handleStatus(task, "todo") : undefined}
         onRename={(text) => void handleRename(task, text)}
         onDefer={task.done ? undefined : () => void moveOff(task, shiftDateKey(task.date, 1))}
         onSchedule={task.done ? undefined : (toDate) => void moveOff(task, toDate)}
         onDelete={() => void handleDelete(task)}
-        onDragStart={(e) => startDrag(task.id, e)}
+        onDragStart={(e) => startDrag(task, e)}
         dragging={draggingId === task.id}
         dropTarget={dropTargetId === task.id && draggingId !== task.id}
       />
@@ -820,12 +898,15 @@ export default function TodoApp({
           </form>
         </div>
 
-        {/* The head's bottom edge doubles as the day's progress. */}
+        {/* The head's bottom edge doubles as the day's progress: done in full
+            accent, and what's in progress after it in a tint, so the bar moves
+            the moment something is picked up. */}
         <div className="todo-progress-track">
           <div
             className={`todo-progress-fill ${progress === 1 ? "todo-progress-fill-complete" : ""}`}
             style={{ width: `${progress * 100}%` }}
           />
+          <div className="todo-progress-started" style={{ width: `${started * 100}%` }} />
         </div>
       </div>
 
@@ -869,9 +950,26 @@ export default function TodoApp({
             key={date}
             className={slide === "next" ? "todo-day-next" : slide === "prev" ? "todo-day-prev" : ""}
           >
-            {openTasks.map((task) => renderRow(task, true))}
+            {/* One keyed list for both open sections, so a row moving between
+                them is the same element travelling, not a new one appearing */}
+            {[
+              progressTasks.length > 0 && (
+                <h2 key="head-progress" className="todo-section-head todo-section-head-first">
+                  <span>In Progress</span>
+                  <span className="todo-figure todo-done-count">{progressTasks.length}</span>
+                </h2>
+              ),
+              ...progressTasks.map((task) => renderRow(task, true)),
+              progressTasks.length > 0 && todoTasks.length > 0 && (
+                <h2 key="head-todo" className="todo-section-head">
+                  <span>Todo</span>
+                  <span className="todo-figure todo-done-count">{todoTasks.length}</span>
+                </h2>
+              ),
+              ...todoTasks.map((task) => renderRow(task, true)),
+            ]}
 
-            {openTasks.length === 0 && (
+            {openCount === 0 && (
               <p
                 className="todo-empty"
                 style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}

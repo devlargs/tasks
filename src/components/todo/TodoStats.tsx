@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MdOutlineChecklist } from "react-icons/md";
 import type { TaskBackend } from "../../lib/api";
-import { carryTrackingSince } from "../../lib/tracking";
+import { carryTrackingSince, pickupTrackingSince } from "../../lib/tracking";
 import type { TodoDayStats } from "../../lib/types";
 import { parseDateKey, todayKey } from "./dates";
 import {
@@ -14,10 +14,13 @@ import {
   type StatsRow,
 } from "./stats";
 
-// How the days went: what got done on each, and what was left unfinished and
-// carried onto a later day. One column per day on a shared baseline — done
-// rises above it, carried hangs below — so a good day reads tall and a day that
-// spilled over reads deep, on one axis and one scale.
+// How the days went: what was picked up on each, what got done, and what was
+// left unfinished and carried onto a later day. One column per day on a shared
+// baseline — done rises above it, carried hangs below — so a good day reads
+// tall and a day that spilled over reads deep, on one axis and one scale.
+// Started stands behind done as a wider outline: most of what gets done was
+// started, so the outline reads as the day's intake and the fill as how much
+// of it landed, without a third bar competing for the eye.
 
 interface TodoStatsProps {
   api: TaskBackend;
@@ -41,6 +44,9 @@ const MAX_BAR = 24;
 const RADIUS = 4;
 // Half the surface gap either side of the baseline
 const BASELINE_GAP = 1;
+// How far the started outline stands out either side of the done column: the
+// 2px surface gap plus its own 1.5px stroke
+const STARTED_INSET = 3.5;
 
 const formatDay = (key: string, options: Intl.DateTimeFormatOptions) =>
   parseDateKey(key).toLocaleDateString(undefined, options);
@@ -84,9 +90,12 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
   const [width, setWidth] = useState(0);
   const chartRef = useRef<HTMLDivElement>(null);
 
-  const trackedSince = useMemo(() => carryTrackingSince(today), [today]);
+  const since = useMemo(
+    () => ({ carried: carryTrackingSince(today), started: pickupTrackingSince(today) }),
+    [today],
+  );
   const days = useMemo(() => rangeDays(today, range), [today, range]);
-  const rows = useMemo(() => statsRows(days, data ?? {}, trackedSince), [days, data, trackedSince]);
+  const rows = useMemo(() => statsRows(days, data ?? {}, since), [days, data, since]);
   const totals = statsTotals(rows);
 
   useEffect(() => {
@@ -120,9 +129,10 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
 
   // --- geometry ------------------------------------------------------------
 
-  const maxDone = Math.max(0, ...rows.map((r) => r.done));
+  // The upper half is scaled to whichever of done and started runs taller
+  const maxUp = Math.max(0, ...rows.map((r) => Math.max(r.done, r.started ?? 0)));
   const maxCarried = Math.max(0, ...rows.map((r) => r.carried ?? 0));
-  const top = niceCeiling(maxDone);
+  const top = niceCeiling(maxUp);
   const bottom = maxCarried > 0 ? niceCeiling(maxCarried) : Math.max(1, Math.round(top / 4));
   const unit = PLOT_HEIGHT / (top + bottom);
   const baseY = top * unit;
@@ -138,9 +148,19 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
       : 0;
 
   const describe = (row: StatsRow) =>
-    `${formatDay(row.date, { weekday: "long", month: "long", day: "numeric" })}: ${row.done} done, ${
+    `${formatDay(row.date, { weekday: "long", month: "long", day: "numeric" })}: ${
+      row.started === null ? "pickups not tracked yet" : `${row.started} started`
+    }, ${row.done} done, ${
       row.carried === null ? "carry-overs not tracked yet" : `${row.carried} carried over`
     }`;
+
+  // Measures this device only began recording partway through the range
+  const untracked = (
+    [
+      ["Carry-overs", since.carried],
+      ["Pickups", since.started],
+    ] as const
+  ).filter(([, from]) => from > days[0]);
 
   const percent =
     totals.followThrough === null ? "—" : `${Math.round(totals.followThrough * 100)}%`;
@@ -212,6 +232,10 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
           <div className={`todo-stats-body ${loading && data ? "todo-stats-refetching" : ""}`}>
             <dl className="todo-stats-tiles">
               <div className="todo-stats-tile">
+                <dt>Started</dt>
+                <dd>{totals.started}</dd>
+              </div>
+              <div className="todo-stats-tile">
                 <dt>Done</dt>
                 <dd>{totals.done}</dd>
               </div>
@@ -230,6 +254,10 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
             </p>
 
             <div className="todo-stats-legend" aria-hidden>
+              <span>
+                <span className="todo-stats-swatch todo-stats-swatch-started" />
+                Started that day
+              </span>
               <span>
                 <span className="todo-stats-swatch todo-stats-swatch-done" />
                 Done that day
@@ -251,7 +279,7 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
                   width={width}
                   height={PLOT_HEIGHT + X_LABEL_BAND}
                   role="img"
-                  aria-label={`Tasks done and carried over per day, the last ${range} days. ${totals.done} done, ${totals.carried} carried over.`}
+                  aria-label={`Tasks started, done and carried over per day, the last ${range} days. ${totals.started} started, ${totals.done} done, ${totals.carried} carried over.`}
                 >
                   {/* Axis: the two extremes and the baseline, nothing between */}
                   <g className="todo-stats-axis">
@@ -287,6 +315,18 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
                     const showLabel = isToday || (rows.length - 1 - i) % every === 0;
                     return (
                       <g key={row.date} className={dim ? "todo-stats-dim" : undefined}>
+                        {/* Drawn first so done paints over it; its baseline
+                            end sits under the gap like done's */}
+                        <path
+                          className="todo-stats-bar-started"
+                          d={barPath(
+                            x - STARTED_INSET + 0.75,
+                            barWidth + 2 * STARTED_INSET - 1.5,
+                            baseY - BASELINE_GAP,
+                            Math.max(0, barHeight(row.started ?? 0, unit) - 0.75),
+                            true,
+                          ).replace(/ Z$/, "")}
+                        />
                         <path
                           className="todo-stats-bar-done"
                           d={barPath(
@@ -361,6 +401,16 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
                         })}
                   </p>
                   <p>
+                    <span className="todo-stats-key todo-stats-key-started" />
+                    {activeRow.started === null ? (
+                      "Pickups not tracked yet"
+                    ) : (
+                      <>
+                        <strong className="todo-figure">{activeRow.started}</strong> started
+                      </>
+                    )}
+                  </p>
+                  <p>
                     <span className="todo-stats-key todo-stats-key-done" />
                     <strong className="todo-figure">{activeRow.done}</strong> done
                   </p>
@@ -378,11 +428,18 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
               )}
             </div>
 
-            {trackedSince > days[0] && (
+            {untracked.length > 0 && (
               <p className="todo-stats-hint">
-                Carry-overs are counted from{" "}
-                {formatDay(trackedSince, { weekday: "long", month: "long", day: "numeric" })}, when
-                this device started recording them. Earlier days show what got done only.
+                {untracked
+                  .map(
+                    ([what, from]) =>
+                      `${what} are counted from ${formatDay(from, {
+                        weekday: "long",
+                        month: "long",
+                        day: "numeric",
+                      })}, when this device started recording them.`,
+                  )
+                  .join(" ")}
               </p>
             )}
 
@@ -400,6 +457,7 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
                 <thead>
                   <tr>
                     <th scope="col">Day</th>
+                    <th scope="col">Started</th>
                     <th scope="col">Done</th>
                     <th scope="col">Carried over</th>
                   </tr>
@@ -416,6 +474,7 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
                               day: "numeric",
                             })}
                       </th>
+                      <td className="todo-figure">{row.started ?? "—"}</td>
                       <td className="todo-figure">{row.done}</td>
                       <td className="todo-figure">{row.carried ?? "—"}</td>
                     </tr>

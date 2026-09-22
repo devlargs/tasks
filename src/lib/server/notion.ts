@@ -1,14 +1,16 @@
-// The Notion side: one database, read and written directly. The schema is the
-// one Largs Hub's Todo creates (electron/tasks.ts) — a title, a Done checkbox,
-// a Date and an Order number — so the desktop app and this site share tasks.
+// The Notion side: one database, read and written directly. The core schema is
+// the one Largs Hub's old desktop Todo created — a title, a Done checkbox, a
+// Date and an Order number — so a database from those days keeps working. The
+// columns added since (the carry log, Status and the time columns) are created
+// the first time a device uses the database.
 //
 // Server-only: the Notion API blocks browser CORS, so the page can't call it
 // itself. Every call carries the visitor's own connection (connection.ts) —
 // the server has no token or database of its own.
 
 import { createHash } from "node:crypto";
-import { isDateKey, sanitizeCarryLog } from "../tasksLogic";
-import type { TodoTask } from "../types";
+import { formatTimeLog, restoreTask } from "../tasksLogic";
+import type { TaskStatus, TodoTask } from "../types";
 import type { NotionConfig } from "./connection";
 
 const NOTION_API = "https://api.notion.com/v1";
@@ -19,6 +21,21 @@ const RICH_TEXT_LIMIT = 2000;
 // The carry log's column: the days a task was carried off, space-separated.
 // Named so it can't collide with a column someone already has.
 const CARRIED_PROP = "Carried from";
+// Where a task stands. A select rather than Notion's own status type, which
+// the API can't create. The Done checkbox is still written alongside it, so
+// views and filters built on Done keep working.
+const STATUS_PROP = "Status";
+// Days the task was picked up, space-separated like the carry log
+const STARTED_PROP = "Started on";
+// Seconds worked per day: "2026-09-22:3600 2026-09-23:1200"
+const TIME_LOG_PROP = "Time log";
+// When the open run began; empty while the task isn't running
+const RUNNING_PROP = "Running since";
+const STATUS_NAMES: Record<TaskStatus, string> = {
+  todo: "Todo",
+  inProgress: "In Progress",
+  done: "Done",
+};
 // Notion allows ~3 requests a second; a reorder can burst past that
 const MAX_RATE_LIMIT_RETRIES = 3;
 
@@ -43,6 +60,8 @@ interface NotionPropertyValue {
   checkbox?: boolean;
   date?: { start: string } | null;
   number?: number | null;
+  select?: { name: string } | null;
+  status?: { name: string } | null;
 }
 
 interface NotionPage {
@@ -54,8 +73,13 @@ interface NotionPage {
   properties: Record<string, NotionPropertyValue>;
 }
 
+interface NotionStatusSchema {
+  options: { id: string; name: string }[];
+  groups: { name: string; option_ids: string[] }[];
+}
+
 interface NotionDatabase {
-  properties: Record<string, { type: string }>;
+  properties: Record<string, { type: string; status?: NotionStatusSchema }>;
 }
 
 interface NotionQueryPage {
@@ -109,47 +133,135 @@ async function notionRequest<T>(
 
 // --- Schema ------------------------------------------------------------------
 
-// Looked up once per connection per server instance: the title property's
-// name (whatever the database calls it) and, if the database is fresh, the
-// three properties a task needs. A database Largs Hub already connected has
-// them all. Keyed by a hash, so tokens aren't kept around as map keys.
-const titleProps = new Map<string, Promise<string>>();
+// How this database holds a task's status: in the select this app creates, or
+// in a native Notion status property someone added themselves.
+interface StatusCodec {
+  read(value: NotionPropertyValue | undefined): TaskStatus | null;
+  write(status: TaskStatus): unknown;
+}
+
+interface Schema {
+  // The title property's name, whatever the database calls it
+  title: string;
+  status: StatusCodec;
+}
+
+const byName = (name: string | undefined) =>
+  (Object.keys(STATUS_NAMES) as TaskStatus[]).find(
+    (s) => STATUS_NAMES[s].toLowerCase() === name?.trim().toLowerCase(),
+  ) ?? null;
+
+const selectCodec: StatusCodec = {
+  // An option this app doesn't know reads as nothing, and the checkbox decides
+  read: (value) => byName(value?.select?.name),
+  // Writing an option the select lacks makes Notion add it
+  write: (status) => ({ select: { name: STATUS_NAMES[status] } }),
+};
+
+// A native status property can't be converted or given options through the
+// API, but its three groups (To-do, In progress, Complete) are fixed, so each
+// option maps onto a state by the group it's in.
+function nativeStatusCodec(schema: NotionStatusSchema | undefined): StatusCodec {
+  const groupStatus = (group: string): TaskStatus | null => {
+    const name = group.toLowerCase().replace(/[^a-z]/g, "");
+    return name === "todo"
+      ? "todo"
+      : name === "inprogress"
+        ? "inProgress"
+        : name === "complete"
+          ? "done"
+          : null;
+  };
+  const byOption = new Map<string, TaskStatus>();
+  const firstOption = new Map<TaskStatus, string>();
+  for (const group of schema?.groups ?? []) {
+    const status = groupStatus(group.name);
+    if (!status) continue;
+    for (const id of group.option_ids) {
+      const option = schema?.options.find((o) => o.id === id);
+      if (!option) continue;
+      byOption.set(option.name, status);
+      if (!firstOption.has(status)) firstOption.set(status, option.name);
+    }
+  }
+  return {
+    read: (value) => {
+      const name = value?.status?.name;
+      return (name !== undefined && byOption.get(name)) || byName(name);
+    },
+    write: (status) => {
+      // Our own name if the property has it, else the first option in the group
+      const own = schema?.options.find((o) => byName(o.name) === status)?.name;
+      return { status: { name: own ?? firstOption.get(status) ?? STATUS_NAMES[status] } };
+    },
+  };
+}
+
+// Looked up once per connection per server instance, and on a fresh database
+// the properties a task needs are added. A database Largs Hub already
+// connected has the core ones. Keyed by a hash, so tokens aren't kept around
+// as map keys.
+const schemas = new Map<string, Promise<Schema>>();
 
 const connectionKey = (config: NotionConfig) =>
   createHash("sha256").update(`${config.apiKey}|${config.databaseId}`).digest("hex");
 
-function titleProp(config: NotionConfig): Promise<string> {
+function schemaFor(config: NotionConfig): Promise<Schema> {
   const key = connectionKey(config);
-  const cached = titleProps.get(key);
+  const cached = schemas.get(key);
   if (cached) return cached;
-  const lookup = (async () => {
+  const lookup = (async (): Promise<Schema> => {
     const id = config.databaseId;
     const db = await notionRequest<NotionDatabase>(config, "GET", `/databases/${id}`);
-    const title = Object.entries(db.properties).find(([, p]) => p.type === "title")?.[0];
+    const props = db.properties;
+    const title = Object.entries(props).find(([, p]) => p.type === "title")?.[0];
     if (!title) throw new NotionError("This database has no title property.");
+    const statusType = props[STATUS_PROP]?.type;
+    if (statusType && statusType !== "select" && statusType !== "status") {
+      throw new NotionError(
+        `This database already has a “${STATUS_PROP}” property that isn't a select. Rename it in Notion and the app will add its own.`,
+      );
+    }
 
     const missing: Record<string, unknown> = {};
-    if (db.properties["Done"]?.type !== "checkbox") missing["Done"] = { checkbox: {} };
-    if (db.properties["Date"]?.type !== "date") missing["Date"] = { date: {} };
-    if (db.properties["Order"]?.type !== "number") missing["Order"] = { number: {} };
-    if (!db.properties[CARRIED_PROP]) missing[CARRIED_PROP] = { rich_text: {} };
+    if (props["Done"]?.type !== "checkbox") missing["Done"] = { checkbox: {} };
+    if (props["Date"]?.type !== "date") missing["Date"] = { date: {} };
+    if (props["Order"]?.type !== "number") missing["Order"] = { number: {} };
+    if (!props[CARRIED_PROP]) missing[CARRIED_PROP] = { rich_text: {} };
+    if (!statusType) {
+      missing[STATUS_PROP] = {
+        select: {
+          options: [
+            { name: STATUS_NAMES.todo, color: "gray" },
+            { name: STATUS_NAMES.inProgress, color: "blue" },
+            { name: STATUS_NAMES.done, color: "green" },
+          ],
+        },
+      };
+    }
+    if (!props[STARTED_PROP]) missing[STARTED_PROP] = { rich_text: {} };
+    if (!props[TIME_LOG_PROP]) missing[TIME_LOG_PROP] = { rich_text: {} };
+    if (!props[RUNNING_PROP]) missing[RUNNING_PROP] = { date: {} };
     if (Object.keys(missing).length > 0) {
       await notionRequest(config, "PATCH", `/databases/${id}`, { properties: missing });
     }
-    return title;
+    return {
+      title,
+      status: statusType === "status" ? nativeStatusCodec(props[STATUS_PROP].status) : selectCodec,
+    };
   })().catch((err) => {
     // Don't cache a failure — the next request should try again
-    titleProps.delete(key);
+    schemas.delete(key);
     throw err;
   });
-  titleProps.set(key, lookup);
+  schemas.set(key, lookup);
   return lookup;
 }
 
 // Checks a connection before it's saved: the token works, the database is
 // shared with it, and it has (or now has) the properties a task needs.
 export async function verifyConnection(config: NotionConfig): Promise<void> {
-  await titleProp(config);
+  await schemaFor(config);
 }
 
 // --- Pages <-> tasks ---------------------------------------------------------
@@ -157,53 +269,82 @@ export async function verifyConnection(config: NotionConfig): Promise<void> {
 const plainText = (rich: NotionRichText[] | undefined) =>
   (rich || []).map((t) => t.plain_text).join("");
 
-function pageToTask(title: string, page: NotionPage): TodoTask | null {
-  const titleValue = page.properties[title];
+const dayList = (value: NotionPropertyValue | undefined) =>
+  plainText(value?.rich_text).split(/[\s,]+/);
+
+// A page as a task. Status comes from the Status column when it holds one of
+// the three states, otherwise from the Done checkbox — so rows from before
+// Status existed, or written by something that only knows Done, read cleanly.
+// The logs and the running time are checked on the way in (restoreTask), and
+// anything unreadable reads as not recorded, never as an error.
+function pageToTask(schema: Schema, page: NotionPage): TodoTask | null {
+  const p = page.properties;
+  const titleValue = p[schema.title];
   const text = plainText(titleValue?.title ?? titleValue?.rich_text).trim();
-  const date = page.properties["Date"]?.date?.start?.slice(0, 10);
-  if (!isDateKey(date)) return null; // not one of ours / no day to file it under
-  return {
+  const done = p["Done"]?.checkbox === true;
+  return restoreTask({
     id: page.id,
     text: text || "Untitled task",
-    done: page.properties["Done"]?.checkbox === true,
-    date,
-    order: page.properties["Order"]?.number ?? 0,
+    status: schema.status.read(p[STATUS_PROP]) ?? (done ? "done" : "todo"),
+    date: p["Date"]?.date?.start?.slice(0, 10), // not one of ours / no day: null
+    order: p["Order"]?.number ?? 0,
     editedAt: page.last_edited_time,
-    ...carryLog(page),
-  };
-}
-
-// The carry log lives in a text column; anything unparseable reads as none
-function carryLog(page: NotionPage): { carriedFrom?: string[] } {
-  const raw = plainText(page.properties[CARRIED_PROP]?.rich_text);
-  const carriedFrom = sanitizeCarryLog(raw.split(/[\s,]+/));
-  return carriedFrom ? { carriedFrom } : {};
+    carriedFrom: dayList(p[CARRIED_PROP]),
+    startedOn: dayList(p[STARTED_PROP]),
+    timeLog: plainText(p[TIME_LOG_PROP]?.rich_text),
+    runningSince: p[RUNNING_PROP]?.date?.start,
+  });
 }
 
 export interface TaskPatch {
   text?: string;
-  done?: boolean;
+  status?: TaskStatus;
   date?: string;
   order?: number;
   carriedFrom?: string[];
+  startedOn?: string[];
+  timeLog?: Record<string, number>;
+  // Null stops the clock
+  runningSince?: string | null;
 }
 
-export type NewTask = Required<Omit<TaskPatch, "carriedFrom">> & Pick<TaskPatch, "carriedFrom">;
+export type NewTask = Required<Pick<TaskPatch, "text" | "status" | "date" | "order">> &
+  Omit<TaskPatch, "text" | "status" | "date" | "order">;
 
-function buildProperties(title: string, patch: TaskPatch) {
+// A task's status and time as a patch, for writes that carry them along
+export const timeFields = (task: TodoTask): TaskPatch => ({
+  startedOn: task.startedOn ?? [],
+  timeLog: task.timeLog ?? {},
+  runningSince: task.runningSince ?? null,
+});
+
+// Empty text is written as no text at all
+const richText = (content: string) =>
+  content ? [{ type: "text", text: { content: content.slice(0, RICH_TEXT_LIMIT) } }] : [];
+
+function buildProperties(schema: Schema, patch: TaskPatch) {
   const properties: Record<string, unknown> = {};
   if (patch.text !== undefined) {
-    properties[title] = {
-      title: [{ type: "text", text: { content: patch.text.slice(0, RICH_TEXT_LIMIT) } }],
-    };
+    properties[schema.title] = { title: richText(patch.text) };
   }
-  if (patch.done !== undefined) properties["Done"] = { checkbox: patch.done };
+  if (patch.status !== undefined) {
+    properties[STATUS_PROP] = schema.status.write(patch.status);
+    // Always in the same write, so the checkbox can't disagree with Status
+    properties["Done"] = { checkbox: patch.status === "done" };
+  }
   if (patch.date !== undefined) properties["Date"] = { date: { start: patch.date } };
   if (patch.order !== undefined) properties["Order"] = { number: patch.order };
   if (patch.carriedFrom !== undefined) {
-    properties[CARRIED_PROP] = {
-      rich_text: [{ type: "text", text: { content: patch.carriedFrom.join(" ") } }],
-    };
+    properties[CARRIED_PROP] = { rich_text: richText(patch.carriedFrom.join(" ")) };
+  }
+  if (patch.startedOn !== undefined) {
+    properties[STARTED_PROP] = { rich_text: richText(patch.startedOn.join(" ")) };
+  }
+  if (patch.timeLog !== undefined) {
+    properties[TIME_LOG_PROP] = { rich_text: richText(formatTimeLog(patch.timeLog)) };
+  }
+  if (patch.runningSince !== undefined) {
+    properties[RUNNING_PROP] = { date: patch.runningSince ? { start: patch.runningSince } : null };
   }
   return properties;
 }
@@ -211,7 +352,7 @@ function buildProperties(title: string, patch: TaskPatch) {
 // --- Operations --------------------------------------------------------------
 
 export async function queryTasks(config: NotionConfig, filter: unknown): Promise<TodoTask[]> {
-  const title = await titleProp(config);
+  const schema = await schemaFor(config);
   const tasks: TodoTask[] = [];
   let cursor: string | null = null;
   do {
@@ -224,7 +365,7 @@ export async function queryTasks(config: NotionConfig, filter: unknown): Promise
       body,
     );
     for (const page of res.results) {
-      const task = pageToTask(title, page);
+      const task = pageToTask(schema, page);
       if (task) tasks.push(task);
     }
     cursor = res.has_more ? res.next_cursor : null;
@@ -235,23 +376,23 @@ export async function queryTasks(config: NotionConfig, filter: unknown): Promise
 // A single task, or null when it's gone. Refuses pages from any other
 // database the integration can see — the id comes from the URL.
 export async function getTask(config: NotionConfig, pageId: string): Promise<TodoTask | null> {
-  const title = await titleProp(config);
+  const schema = await schemaFor(config);
   const page = await notionRequest<NotionPage>(config, "GET", `/pages/${pageId}`).catch((err) => {
     if (err instanceof NotionError && /could not find/i.test(err.message)) return null;
     throw err;
   });
   if (!page || page.archived || page.in_trash) return null;
   if (!sameId(page.parent?.database_id, config.databaseId)) return null;
-  return pageToTask(title, page);
+  return pageToTask(schema, page);
 }
 
 export async function createTask(config: NotionConfig, task: NewTask): Promise<TodoTask> {
-  const title = await titleProp(config);
+  const schema = await schemaFor(config);
   const page = await notionRequest<NotionPage>(config, "POST", "/pages", {
     parent: { database_id: config.databaseId },
-    properties: buildProperties(title, task),
+    properties: buildProperties(schema, task),
   });
-  const created = pageToTask(title, page);
+  const created = pageToTask(schema, page);
   if (!created) throw new NotionError("Notion returned a page without a date.");
   return created;
 }
@@ -261,11 +402,11 @@ export async function updateTask(
   pageId: string,
   patch: TaskPatch,
 ): Promise<TodoTask> {
-  const title = await titleProp(config);
+  const schema = await schemaFor(config);
   const page = await notionRequest<NotionPage>(config, "PATCH", `/pages/${pageId}`, {
-    properties: buildProperties(title, patch),
+    properties: buildProperties(schema, patch),
   });
-  const updated = pageToTask(title, page);
+  const updated = pageToTask(schema, page);
   if (!updated) throw new NotionError("Notion returned a page without a date.");
   return updated;
 }

@@ -9,6 +9,8 @@ import {
   summaryPhrase,
   weekdayLabels,
 } from "../src/components/todo/calendar";
+import { summarizeDays } from "../src/lib/tasksLogic";
+import type { TaskStatus, TodoTask } from "../src/lib/types";
 
 describe("months", () => {
   it("finds the first of the month", () => {
@@ -53,12 +55,12 @@ describe("monthGrid", () => {
 describe("monthTotals", () => {
   it("sums only the month's own days", () => {
     const days = {
-      "2026-08-31": { done: 5, pending: 0 },
-      "2026-09-01": { done: 2, pending: 1 },
-      "2026-09-16": { done: 1, pending: 3 },
-      "2026-10-01": { done: 0, pending: 4 },
+      "2026-08-31": { done: 5, inProgress: 1, pending: 0 },
+      "2026-09-01": { done: 2, inProgress: 2, pending: 1 },
+      "2026-09-16": { done: 1, inProgress: 0, pending: 3 },
+      "2026-10-01": { done: 0, inProgress: 1, pending: 4 },
     };
-    expect(monthTotals(days, "2026-09-01")).toEqual({ done: 3, pending: 4 });
+    expect(monthTotals(days, "2026-09-01")).toEqual({ done: 3, inProgress: 2, pending: 4 });
   });
 });
 
@@ -76,8 +78,46 @@ describe("weekdayLabels", () => {
 
 describe("summaryPhrase", () => {
   it("describes a day's counts", () => {
-    expect(summaryPhrase({ done: 2, pending: 1 })).toBe("2 done, 1 pending");
+    expect(summaryPhrase({ done: 2, inProgress: 1, pending: 1 })).toBe(
+      "2 done, 1 in progress, 1 pending",
+    );
     expect(summaryPhrase(undefined)).toBe("no tasks");
-    expect(summaryPhrase({ done: 0, pending: 0 })).toBe("no tasks");
+    expect(summaryPhrase({ done: 0, inProgress: 0, pending: 0 })).toBe("no tasks");
+    // A day with only work in progress still has tasks on it
+    expect(summaryPhrase({ done: 0, inProgress: 1, pending: 0 })).toBe(
+      "0 done, 1 in progress, 0 pending",
+    );
+  });
+});
+
+describe("summarizeDays", () => {
+  const task = (id: string, date: string, status: TaskStatus): TodoTask => ({
+    id,
+    text: id,
+    status,
+    done: status === "done",
+    date,
+    order: 0,
+    editedAt: "2026-09-01T00:00:00.000Z",
+  });
+
+  it("tallies each day three ways: done, in progress, pending", () => {
+    const days = summarizeDays(
+      [
+        task("a", "2026-09-01", "done"),
+        task("b", "2026-09-01", "inProgress"),
+        task("c", "2026-09-01", "inProgress"),
+        task("d", "2026-09-01", "todo"),
+        task("e", "2026-09-02", "inProgress"),
+        task("f", "2026-10-01", "todo"),
+      ],
+      "2026-09-01",
+      "2026-09-30",
+    );
+    expect(days).toEqual({
+      "2026-09-01": { done: 1, inProgress: 2, pending: 1 },
+      "2026-09-02": { done: 0, inProgress: 1, pending: 0 },
+    });
+    expect(summaryPhrase(days["2026-09-02"])).toBe("0 done, 1 in progress, 0 pending");
   });
 });

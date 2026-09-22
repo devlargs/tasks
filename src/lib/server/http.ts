@@ -1,6 +1,7 @@
 // Small helpers shared by the API routes: JSON replies and one error path.
 
 import type { AstroCookies } from "astro";
+import { deviceClock, type DeviceClock } from "../tasksLogic";
 import { readConnection, type NotionConfig } from "./connection";
 import { NotionError } from "./notion";
 
@@ -38,6 +39,11 @@ export function withNotion(
   }
   return handle(() => run(config));
 }
+
+// The device's clock from a request's `now` and `tz`, checked against the
+// server's own (see deviceClock). Never fails: a bad clock is replaced.
+export const clockFrom = (now: unknown, tz: unknown): DeviceClock =>
+  deviceClock(now, tz, new Date());
 
 export async function readJson(request: Request): Promise<Record<string, unknown>> {
   const body = await request.json().catch(() => null);

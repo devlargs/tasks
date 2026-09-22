@@ -5,11 +5,15 @@
 
 import type { TaskBackend } from "./api";
 import {
+  bankElapsed,
   carryOverPending,
+  changeStatus,
+  formatInstant,
   isCarry,
+  isTaskStatus,
   logCarry,
   MAX_STATS_DAYS,
-  sanitizeCarryLog,
+  restoreTask,
   shiftDateKey,
   summarizeStats,
   isRealDate,
@@ -20,6 +24,8 @@ import {
   summarizeDays,
   tasksForDate,
   topOrder,
+  type DeviceClock,
+  type ZoneOffset,
 } from "./tasksLogic";
 import type { TodoTask } from "./types";
 
@@ -33,27 +39,15 @@ export interface KeyValueStore {
   removeItem(key: string): void;
 }
 
-const isTask = (value: unknown): value is TodoTask => {
-  const t = value as Partial<TodoTask> | null;
-  return (
-    !!t &&
-    typeof t.id === "string" &&
-    typeof t.text === "string" &&
-    typeof t.done === "boolean" &&
-    isRealDate(t.date) &&
-    typeof t.order === "number" &&
-    typeof t.editedAt === "string"
-  );
-};
-
+// A list saved before In Progress existed has no status on its tasks; they're
+// read as done or todo by their done flag, with no time recorded, so nobody
+// loses their list to the upgrade. It's written back in the new shape on the
+// next change.
 export function readLocalTasks(store: KeyValueStore): TodoTask[] {
   try {
     const data = JSON.parse(store.getItem(LOCAL_TASKS_KEY) ?? "[]") as unknown;
     if (!Array.isArray(data)) return [];
-    return data.filter(isTask).map(({ carriedFrom, ...task }) => {
-      const log = sanitizeCarryLog(carriedFrom);
-      return log ? { ...task, carriedFrom: log } : task;
-    });
+    return data.map(restoreTask).filter((t): t is TodoTask => t !== null);
   } catch {
     return [];
   }
@@ -69,6 +63,9 @@ interface LocalBackendOptions {
   // The device's today, YYYY-MM-DD
   today: () => string;
   now?: () => string;
+  // The device's calendar, for splitting time across days. The browser's own
+  // time zone unless a test says otherwise.
+  zone?: ZoneOffset;
   newId?: () => string;
 }
 
@@ -76,9 +73,15 @@ export function createLocalBackend({
   store,
   today,
   now = () => new Date().toISOString(),
+  zone = (ms) => -new Date(ms).getTimezoneOffset(),
   newId = () => `${LOCAL_ID_PREFIX}${crypto.randomUUID()}`,
 }: LocalBackendOptions): TaskBackend {
   const read = () => readLocalTasks(store);
+  // The same moment as `now`, written the way the Notion routes receive it
+  const clock = (): DeviceClock => {
+    const ms = Date.parse(now());
+    return { now: formatInstant(ms, zone(ms)), zone };
+  };
   // A write that can't land (storage full or blocked) is reported, not thrown
   const save = (tasks: TodoTask[]): string | null => {
     try {
@@ -91,7 +94,7 @@ export function createLocalBackend({
 
   // Unfinished work from earlier days moves onto today, as it does in Notion
   const carryIntoToday = (tasks: TodoTask[], day: string) => {
-    const moves = carryOverPending(tasks, tasksForDate(tasks, day), day);
+    const moves = carryOverPending(tasks, tasksForDate(tasks, day), day, clock());
     if (moves.length === 0) return { tasks, carried: [] as string[] };
     const stamp = now();
     const moved = new Map(moves.map((t) => [t.id, { ...t, editedAt: stamp }]));
@@ -145,6 +148,7 @@ export function createLocalBackend({
       const task: TodoTask = {
         id: newId(),
         text,
+        status: "todo",
         done: false,
         date,
         // Newest first, like Notion
@@ -159,13 +163,17 @@ export function createLocalBackend({
       const tasks = read();
       const task = findTask(tasks, id);
       if (!task) return { ok: false, error: "Task not found." };
-      const next = { ...task, editedAt: now() };
+      let next = { ...task, editedAt: now() };
       if (patch.text !== undefined) {
         const text = sanitizeTaskText(patch.text);
         if (!text) return { ok: false, error: "Task text is required." };
         next.text = text;
       }
-      if (patch.done !== undefined) next.done = patch.done === true;
+      if (patch.status !== undefined) {
+        if (!isTaskStatus(patch.status)) return { ok: false, error: "Invalid status." };
+        const { now: at, zone: calendar } = clock();
+        next = changeStatus(next, patch.status, tasks, at, calendar);
+      }
       const error = save(tasks.map((t) => (t.id === id ? next : t)));
       return error ? { ok: false, error } : { ok: true, task: next };
     },
@@ -179,9 +187,12 @@ export function createLocalBackend({
       if (!task) return { ok: false, error: "Task not found." };
       if (task.date === date) return { ok: true, task };
       // Onto the end of that day, where the carry-over would put it. Leaving
-      // today (or an earlier day) unfinished counts as carrying it over.
+      // today (or an earlier day) unfinished counts as carrying it over. A
+      // running task keeps running, with its time so far banked.
       const logged = isCarry(task, date, today()) ? logCarry(task, task.date) : task;
-      const moved = { ...logged, date, order: nextOrder(tasks, date), editedAt: now() };
+      const { now: at, zone: calendar } = clock();
+      const banked = bankElapsed(logged, at, calendar);
+      const moved = { ...banked, date, order: nextOrder(tasks, date), editedAt: now() };
       const error = save(tasks.map((t) => (t.id === id ? moved : t)));
       return error ? { ok: false, error } : { ok: true, task: moved };
     },

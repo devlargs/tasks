@@ -13,6 +13,14 @@ export interface StatsRow {
   done: number;
   // Null before carry-overs were being recorded: unknown, not zero
   carried: number | null;
+  // Null before pickups were being recorded, the same way
+  started: number | null;
+}
+
+// The first day this device recorded each measure
+export interface TrackedSince {
+  carried: string;
+  started: string;
 }
 
 // The last `days` days, oldest first, ending today.
@@ -23,18 +31,21 @@ export function rangeDays(today: string, days: number): string[] {
 export function statsRows(
   days: string[],
   data: Record<string, TodoDayStats>,
-  trackedSince: string,
+  since: TrackedSince,
 ): StatsRow[] {
   return days.map((date) => ({
     date,
     done: data[date]?.done ?? 0,
-    carried: date < trackedSince ? null : (data[date]?.carried ?? 0),
+    carried: date < since.carried ? null : (data[date]?.carried ?? 0),
+    started: date < since.started ? null : (data[date]?.started ?? 0),
   }));
 }
 
 export interface StatsTotals {
   done: number;
   carried: number;
+  // Pickups over the days they were recorded
+  started: number;
   // done / (done + carried) over the tracked days, or null with nothing to go on
   followThrough: number | null;
 }
@@ -44,16 +55,18 @@ export interface StatsTotals {
 export function statsTotals(rows: StatsRow[]): StatsTotals {
   let done = 0;
   let carried = 0;
+  let started = 0;
   let trackedDone = 0;
   for (const row of rows) {
     done += row.done;
+    started += row.started ?? 0;
     if (row.carried !== null) {
       carried += row.carried;
       trackedDone += row.done;
     }
   }
   const settled = trackedDone + carried;
-  return { done, carried, followThrough: settled === 0 ? null : trackedDone / settled };
+  return { done, carried, started, followThrough: settled === 0 ? null : trackedDone / settled };
 }
 
 // The axis top for a count: the smallest clean number at or above it, so the

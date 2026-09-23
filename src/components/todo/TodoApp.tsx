@@ -24,6 +24,7 @@ import { changeStatus, restoreTask } from "../../lib/tasksLogic";
 import { carryTrackingSince, pickupTrackingSince } from "../../lib/tracking";
 import type { TaskStatus, TodoTask } from "../../lib/types";
 import { dissolveDurationMs } from "./dissolve";
+import ConfirmDialog from "./ConfirmDialog";
 import { matchesSearch, searchTerms } from "./search";
 import TaskRow from "./TaskRow";
 import TodoCalendar from "./TodoCalendar";
@@ -171,6 +172,12 @@ export default function TodoApp({
   // Done matches show open during a search, without touching the list's own
   // Done toggle; a new query opens them again
   const [searchDoneOpen, setSearchDoneOpen] = useState(true);
+  // Finishing and deleting a task each ask first — both are one stray click
+  // from the row's other buttons
+  const [confirming, setConfirming] = useState<{
+    action: "done" | "delete";
+    task: TodoTask;
+  } | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   // A row whose checkbox had focus when its task changed section; the focus
@@ -746,12 +753,16 @@ export default function TodoApp({
         task={task}
         dissolving={dissolvingId === task.id}
         reorderable={reorderable}
-        onToggle={() => void handleStatus(task, NEXT_STATUS[task.status])}
+        onToggle={() =>
+          NEXT_STATUS[task.status] === "done"
+            ? setConfirming({ action: "done", task })
+            : void handleStatus(task, NEXT_STATUS[task.status])
+        }
         onBack={task.status === "inProgress" ? () => void handleStatus(task, "todo") : undefined}
         onRename={(text) => void handleRename(task, text)}
         onDefer={task.done ? undefined : () => void moveOff(task, shiftDateKey(task.date, 1))}
         onSchedule={task.done ? undefined : (toDate) => void moveOff(task, toDate)}
-        onDelete={() => void handleDelete(task)}
+        onDelete={() => setConfirming({ action: "delete", task })}
         onDragStart={(e) => startDrag(task, e)}
         dragging={draggingId === task.id}
         dropTarget={dropTargetId === task.id && draggingId !== task.id}
@@ -1137,6 +1148,30 @@ export default function TodoApp({
           </div>
         </div>
       </div>
+
+      {confirming && (
+        <ConfirmDialog
+          title={confirming.action === "done" ? "Mark this task as done?" : "Delete this task?"}
+          confirmLabel={confirming.action === "done" ? "Mark as done" : "Delete"}
+          destructive={confirming.action === "delete"}
+          onConfirm={() => {
+            const { action, task } = confirming;
+            setConfirming(null);
+            if (action === "done") void handleStatus(task, "done");
+            else void handleDelete(task);
+          }}
+          onCancel={() => setConfirming(null)}
+        >
+          <p className="todo-confirm-task">{confirming.task.text}</p>
+          {confirming.action === "delete" && (
+            <p>
+              {mode === "notion"
+                ? "Its page goes to the trash in Notion."
+                : "This can't be undone."}
+            </p>
+          )}
+        </ConfirmDialog>
+      )}
     </div>
   );
 }

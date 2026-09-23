@@ -2,6 +2,7 @@
   "name": "tasks",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "Largs Hub's Todo list on the web — the same Notion database, from anywhere",
   "scripts": {

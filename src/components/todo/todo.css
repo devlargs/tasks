@@ -104,6 +104,33 @@
   opacity: 1;
 }
 
+/* --- Search -------------------------------------------------------------- */
+
+/* Sits under the composer, a step quieter than it: a flat field with no raised
+   fill, so the composer stays the page's one primary input. */
+.todo-search {
+  gap: var(--space-xs);
+  padding: var(--space-3xs) var(--space-3xs) var(--space-3xs) var(--space-sm);
+  margin-top: calc(var(--space-md) * -0.5);
+  margin-bottom: var(--space-md);
+  border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  transition: border-color var(--dur-short) var(--ease-out);
+}
+
+.todo-search:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+/* The field brings its own close button; the browser's clear cross would be a
+   second one */
+.todo-search input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.todo-search input:focus-visible {
+  outline: none;
+}
+
 /* --- Progress: the head's bottom edge ------------------------------------ */
 
 .todo-progress-track {
@@ -807,6 +834,7 @@
   .todo-row-action,
   .todo-composer,
   .todo-composer-hint,
+  .todo-search,
   .todo-progress-fill,
   .todo-progress-started,
   .todo-check-half,

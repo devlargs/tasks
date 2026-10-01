@@ -56,3 +56,6 @@ npx expo lint
 - `src/components/setup/`: the first-run choice and the Notion connection form
 - `src/components/todo/`: the list, its rows, the schedule picker, calendar and Progress view
 - `src/components/theme.ts`: the palette and scales from the web's `global.css`
+- `scripts/build-icons.mjs`: the app icon — the Todo, In Progress and Done checkboxes on Mocha —
+  drawn once and rendered to every size `app.json` uses (`npm run icons`, needs Google Chrome).
+  The SVG sources land in `assets/icon/`, the iOS Icon Composer bundle in `assets/tasks.icon/`

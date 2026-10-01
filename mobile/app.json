@@ -1,14 +1,14 @@
 {
   "expo": {
     "name": "Tasks",
-    "slug": "mobile",
+    "slug": "largs-tasks",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "tasks",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/tasks.icon"
     },
     "android": {
       "adaptiveIcon": {
@@ -30,7 +30,7 @@
         {
           "backgroundColor": "#181825",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76,
+          "imageWidth": 168,
           "dark": {
             "backgroundColor": "#181825"
           }
@@ -42,6 +42,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "6a8b6c91-c54c-493f-9ee2-e6c9abe47c82"
+      }
+    },
+    "owner": "devlargs"
   }
 }

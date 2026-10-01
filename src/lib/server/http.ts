@@ -11,10 +11,10 @@ export const fail = (error: string, status = 400) =>
   Response.json({ ok: false, error }, { status });
 
 // Turns anything a handler throws into the { ok: false } shape the island
-// expects. Notion's own messages are safe to show (they name the problem, not
-// the token); anything else is logged and kept vague.
+// expects. A Notion failure is described in plain words (NotionError logs
+// Notion's own); anything else is logged and kept vague.
 export function failure(err: unknown): Response {
-  if (err instanceof NotionError) return fail(err.message, 502);
+  if (err instanceof NotionError) return fail(err.userMessage, 502);
   console.error(err);
   return fail("Something went wrong.", 500);
 }

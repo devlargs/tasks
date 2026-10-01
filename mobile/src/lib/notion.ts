@@ -35,16 +35,47 @@ const STATUS_NAMES: Record<TaskStatus, string> = {
   inProgress: "In Progress",
   done: "Done",
 };
-// Notion allows ~3 requests a second; a reorder can burst past that
-const MAX_RATE_LIMIT_RETRIES = 3;
+// How many times a request is sent again when Notion says the trouble is
+// passing. Notion allows ~3 requests a second, and a reorder can burst past
+// that; its servers also have short bad patches of their own.
+const MAX_RETRIES = 3;
+// The statuses Notion documents as temporary: a save conflict, a rate limit,
+// and its own server trouble (developers.notion.com/reference/status-codes)
+const TRANSIENT_STATUSES = new Set([409, 429, 500, 502, 503, 504, 529]);
+
+// What a person is told when Notion fails. Notion's own messages are written
+// for developers, and its server errors can be internal noise ("Cross-cell
+// memcached access is not allowed"), so the API's words are only logged.
+function describeFailure(status: number): string {
+  if (status === 401) {
+    return "Notion didn't accept this device's secret. Disconnect and connect Notion again from the settings menu.";
+  }
+  if (status === 403 || status === 404) {
+    return "Notion can't find the database any more. Open it in Notion, choose ••• › Connections, and check your integration is still there.";
+  }
+  if (status === 429) return "Notion is busy right now. Try again in a minute.";
+  if (status === 400) {
+    return "Notion turned that change down. Check the database's Done, Date, Order and Status columns haven't changed type.";
+  }
+  return "Notion had a problem on its side. Try again in a moment.";
+}
 
 export class NotionError extends Error {
-  // Notion's HTTP status, when the error came from the API
+  // What the app shows. The message itself is for the logs: Notion's own
+  // wording when the error came from the API.
+  readonly userMessage: string;
+
   constructor(
     message: string,
+    // Notion's HTTP status, when the error came from the API
     readonly status?: number,
+    // Notion's error code and request id, for the logs
+    readonly code?: string,
+    readonly requestId?: string,
   ) {
     super(message);
+    // An error the app raised itself is already written for people
+    this.userMessage = status === undefined ? message : describeFailure(status);
   }
 }
 
@@ -92,12 +123,27 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
 const sameId = (a: string | undefined, b: string) =>
   !!a && a.replace(/-/g, "").toLowerCase() === b.replace(/-/g, "").toLowerCase();
 
+// Whether a request can be sent twice without changing the outcome: reads,
+// queries, and updates that set the same values again. Creating a page can't —
+// Notion says a failed write may still have saved, so a retry could add the
+// task twice.
+const isRepeatable = (method: string, path: string) =>
+  method === "GET" || method === "PATCH" || path.endsWith("/query");
+
+// 0.5s, 1s, 2s, give or take, unless Notion says how long to wait
+function retryDelay(res: Response | null, attempt: number): number {
+  const retryAfter = Number(res?.headers.get("Retry-After"));
+  if (Number.isFinite(retryAfter) && retryAfter > 0) return Math.min(retryAfter, 10) * 1000;
+  return 500 * 2 ** attempt * (0.8 + Math.random() * 0.4);
+}
+
 async function notionRequest<T>(
   config: NotionConfig,
   method: string,
   path: string,
   body?: unknown,
 ): Promise<T> {
+  const repeatable = isRepeatable(method, path);
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(`${NOTION_API}${path}`, {
       method,
@@ -107,24 +153,39 @@ async function notionRequest<T>(
         ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
-    }).catch(() => {
-      throw new NotionError("Could not reach the Notion API.");
-    });
+    }).catch(() => null);
 
-    if (res.status === 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
-      const retryAfter = Number(res.headers.get("Retry-After"));
-      await wait(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 1000);
+    // A dropped connection or a server error may have come after the change
+    // landed, so only a repeatable request goes again. A rate limit means
+    // nothing was done, so anything does.
+    const retry =
+      res === null
+        ? repeatable
+        : res.status === 429 || (repeatable && TRANSIENT_STATUSES.has(res.status));
+    if (retry && attempt < MAX_RETRIES) {
+      await wait(retryDelay(res, attempt));
       continue;
     }
 
-    const data = (await res.json().catch(() => null)) as { message?: string } | null;
+    if (res === null) {
+      throw new NotionError("Couldn't reach Notion. Check the connection and try again.");
+    }
+    const data = (await res.json().catch(() => null)) as {
+      message?: string;
+      code?: string;
+    } | null;
     if (!res.ok) {
-      throw new NotionError(
-        data && typeof data.message === "string"
-          ? data.message
-          : `Notion API error (HTTP ${res.status})`,
+      const error = new NotionError(
+        typeof data?.message === "string" ? data.message : `Notion API error (HTTP ${res.status})`,
         res.status,
+        typeof data?.code === "string" ? data.code : undefined,
+        res.headers.get("x-notion-request-id") ?? undefined,
       );
+      console.warn(
+        `Notion ${method} ${path.split("?")[0]} failed: ${error.status} ${error.code ?? ""} ${error.message}` +
+          (error.requestId ? ` (request ${error.requestId})` : ""),
+      );
+      throw error;
     }
     return data as T;
   }
@@ -376,7 +437,7 @@ export async function queryTasks(config: NotionConfig, filter: unknown): Promise
 export async function getTask(config: NotionConfig, pageId: string): Promise<TodoTask | null> {
   const schema = await schemaFor(config);
   const page = await notionRequest<NotionPage>(config, "GET", `/pages/${pageId}`).catch((err) => {
-    if (err instanceof NotionError && /could not find/i.test(err.message)) return null;
+    if (err instanceof NotionError && err.status === 404) return null;
     throw err;
   });
   if (!page || page.archived || page.in_trash) return null;

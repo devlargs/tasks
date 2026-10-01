@@ -51,10 +51,10 @@ type Failure = { ok: false; error: string };
 
 const fail = (error: string): Failure => ({ ok: false, error });
 
-// Notion's own messages are safe to show (they name the problem, not the
-// token); anything else is logged and kept vague.
+// A Notion failure is described in plain words (NotionError logs Notion's
+// own); anything else is logged and kept vague.
 function failure(err: unknown): Failure {
-  if (err instanceof NotionError) return fail(err.message);
+  if (err instanceof NotionError) return fail(err.userMessage);
   console.error(err);
   return fail("Something went wrong.");
 }

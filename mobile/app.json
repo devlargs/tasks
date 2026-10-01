@@ -8,7 +8,11 @@
     "scheme": "tasks",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/tasks.icon"
+      "bundleIdentifier": "com.ralphlargo.tasks",
+      "icon": "./assets/tasks.icon",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {

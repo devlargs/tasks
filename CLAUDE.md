@@ -41,6 +41,13 @@ To check the identical copies haven't drifted (no output means they match):
 for f in src/lib/types.ts src/lib/tasksLogic.ts src/lib/themeChoice.ts src/components/todo/{calendar,dates,dissolve,elapsed,links,search,stats}.ts; do diff -q "$f" "mobile/$f"; done
 ```
 
+## Mobile releases
+
+Pushing to `main` with changes under `mobile/` sends a new iOS build to TestFlight
+(`.github/workflows/mobile-testflight.yml` → `npm run testflight` in `mobile/`). Every such push
+uses an EAS build, so group mobile changes into one push where you can. The one-time setup is in
+`mobile/README.md`.
+
 ## Before calling a change done
 
 Web:

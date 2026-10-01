@@ -41,6 +41,46 @@ Then open it in Expo Go, an iOS simulator (`i`) or an Android emulator (`a`). Ev
 it uses (`expo-sqlite`, `expo-secure-store`, `expo-crypto`, `react-native-svg`) is included in
 Expo Go.
 
+## On your iPhone: TestFlight
+
+```bash
+npm run testflight
+```
+
+Builds the app on EAS, signs it for Apple distribution and uploads it to TestFlight. The build
+goes out to the people in your TestFlight testing group. It isn't released on the App Store and
+doesn't go through App Review. Each run gets the next build number automatically.
+
+### Once, before the first run
+
+1. You need a paid Apple Developer account, and the TestFlight app on the iPhone.
+2. Check `ios.bundleIdentifier` in `app.json` (`com.ralphlargo.tasks`). It's permanent once the
+   app exists on App Store Connect.
+3. Run `npm run testflight` from your own machine, not CI. The first run asks questions: sign in
+   to Apple, let EAS create the distribution certificate and provisioning profile, and when it
+   submits, let it create the app on App Store Connect and an App Store Connect API key. EAS
+   keeps all of these for later runs.
+4. Copy the app's App Store Connect id (the submit step prints it; it's also under App Store
+   Connect › App Information › Apple ID) into `eas.json` as `submit.testflight.ios.ascAppId`.
+   That's what lets later runs, including CI, submit without asking anything.
+5. In App Store Connect › TestFlight, add yourself to an internal testing group, then open the
+   build from the TestFlight app on the phone.
+
+### From GitHub
+
+`.github/workflows/mobile-testflight.yml` runs `npm run testflight` on every push to `main` that
+changes something in `mobile/`, and can also be started by hand from the Actions tab. It needs an
+`EXPO_TOKEN` repository secret: create a token at expo.dev › Settings › Access tokens, then
+
+```bash
+gh secret set EXPO_TOKEN
+```
+
+The job only starts the build (`--no-wait`). Building and uploading happen on EAS, and the
+commit message becomes the build's "What to Test" note. Until step 4 above is done, the job stops
+before building rather than using up a build that can't be submitted. Every run uses one iOS build
+from your EAS plan.
+
 ## Checks
 
 ```bash

@@ -1,0 +1,67 @@
+# Every push to main that touches mobile/ sends a new build of the iOS app to
+# TestFlight, so the phone picks it up. The build and the upload run on EAS's
+# servers; this job only starts them (--no-wait), so it finishes in a minute or
+# two. Follow a build at expo.dev, or in the TestFlight app once it's processed.
+#
+# Needs, once:
+#   - a first `npm run testflight` from your own machine (see mobile/README.md),
+#     which sets up signing and the App Store Connect key on EAS
+#   - submit.testflight.ios.ascAppId filled in in mobile/eas.json
+#   - an EXPO_TOKEN repository secret (expo.dev › Settings › Access tokens)
+
+name: Mobile → TestFlight
+
+on:
+  push:
+    branches: [main]
+    paths: ["mobile/**"]
+  workflow_dispatch:
+
+# One release at a time; a push that lands mid-run queues behind it
+concurrency:
+  group: mobile-testflight
+  cancel-in-progress: false
+
+jobs:
+  testflight:
+    name: Build and send to TestFlight
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Set up Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Without an App Store Connect app id, a non-interactive submit can't
+      # run, and the build would be spent for nothing
+      - name: Check TestFlight is set up
+        run: |
+          node -e '
+            const id = require("./eas.json").submit?.testflight?.ios?.ascAppId;
+            if (!id) {
+              console.error("::error::mobile/eas.json has no submit.testflight.ios.ascAppId. Run `npm run testflight` once from your machine, then copy the app id it reports (or App Store Connect › App Information › Apple ID) into eas.json.");
+              process.exit(1);
+            }
+          '
+
+      - name: Build and submit
+        env:
+          # The commit message becomes TestFlight's "What to Test". Passed
+          # through the environment, never pasted into the script.
+          WHAT_TO_TEST: ${{ github.event.head_commit.message || 'Manual run' }}
+        run: npm run testflight -- --non-interactive --no-wait --what-to-test "$WHAT_TO_TEST"

@@ -44,7 +44,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "icons": "node scripts/build-icons.mjs"
+    "icons": "node scripts/build-icons.mjs",
+    "testflight": "npx --yes eas-cli@latest build --platform ios --profile testflight --auto-submit"
   },
   "private": true
 }

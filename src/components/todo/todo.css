@@ -104,6 +104,128 @@
   opacity: 1;
 }
 
+/* --- Confirm dialog ------------------------------------------------------ */
+
+/* The same floating surface as the schedule picker. The <dialog> itself is
+   bare (no padding) so a press on it is known to be on the backdrop. */
+.todo-confirm {
+  width: min(22rem, calc(100vw - 2 * var(--space-md)));
+  margin: auto;
+  padding: 0;
+  font-family: var(--font-ui);
+  color: var(--text-primary);
+  background: var(--context-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  animation: todo-done-open var(--dur-short) var(--ease-out);
+}
+
+.todo-confirm::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.todo-confirm-panel {
+  padding: var(--space-md);
+}
+
+.todo-confirm-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.todo-confirm-body {
+  margin-top: var(--space-xs);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.todo-confirm-body p + p {
+  margin-top: var(--space-2xs);
+}
+
+/* The task itself, quoted, so it's clear which row the click landed on */
+.todo-confirm-task {
+  padding: var(--space-xs) var(--space-sm);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+  background: color-mix(in srgb, var(--panel) 70%, var(--surface));
+  border-radius: 8px;
+}
+
+.todo-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-xs);
+  margin-top: var(--space-md);
+}
+
+.todo-confirm-actions button {
+  padding: var(--space-2xs) var(--space-sm);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.todo-confirm-cancel {
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid var(--border);
+}
+
+.todo-confirm-cancel:hover {
+  background: var(--context-hover);
+}
+
+.todo-confirm-ok {
+  color: var(--surface);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.todo-confirm-ok-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+.todo-confirm-ok:hover {
+  filter: brightness(1.08);
+}
+
+.todo-confirm :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --- Search -------------------------------------------------------------- */
+
+/* Sits under the composer, a step quieter than it: a flat field with no raised
+   fill, so the composer stays the page's one primary input. */
+.todo-search {
+  gap: var(--space-xs);
+  padding: var(--space-3xs) var(--space-3xs) var(--space-3xs) var(--space-sm);
+  margin-top: calc(var(--space-md) * -0.5);
+  margin-bottom: var(--space-md);
+  border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+  transition: border-color var(--dur-short) var(--ease-out);
+}
+
+.todo-search:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+/* The field brings its own close button; the browser's clear cross would be a
+   second one */
+.todo-search input::-webkit-search-cancel-button {
+  appearance: none;
+}
+
+.todo-search input:focus-visible {
+  outline: none;
+}
+
 /* --- Progress: the head's bottom edge ------------------------------------ */
 
 .todo-progress-track {
@@ -807,6 +929,7 @@
   .todo-row-action,
   .todo-composer,
   .todo-composer-hint,
+  .todo-search,
   .todo-progress-fill,
   .todo-progress-started,
   .todo-check-half,
@@ -831,7 +954,8 @@
   .todo-done-list,
   .todo-pill-syncing,
   .todo-running-dot,
-  .todo-picker {
+  .todo-picker,
+  .todo-confirm {
     animation: none !important;
   }
 

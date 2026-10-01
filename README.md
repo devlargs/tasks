@@ -1,94 +1,136 @@
 # Tasks
 
-A daily task list that carries unfinished work forward. It lives at **tasks.ralphlargo.com**, and
-it's the Todo service inside Largs Hub.
+A daily task list that carries unfinished work forward to the next day.
 
-Anyone can use it, with no account. The first time you open it, it asks where to keep your tasks:
+There are no accounts. The first time you open it, it asks where to keep your tasks:
 
-- **Sync with Notion.** Paste an integration secret and a database link. Tasks are read from and
-  written to that database, so every device you connect to it sees the same list. The database
-  gets a title, a `Done` checkbox, a `Date` and an `Order` number, plus `Carried from`, `Status`,
-  `Started on`, `Time log` and `Running since` (any missing ones are added for you, the first time
-  a device uses the database). `Status` is a select with `Todo`, `In Progress` and `Done`; if the
-  database already has Notion's own status property called `Status`, its To-do / In progress /
-  Complete groups are used instead. The `Done` checkbox is still written with every status change,
-  so views and filters built on it keep working. `Time log` is plain text you can read in Notion:
-  seconds worked per day, like `2026-09-22:3600 2026-09-23:1200`.
-- **Keep them on this device.** Tasks stay in the browser's local storage. Nothing leaves the
-  device. You can connect Notion later from the settings menu, and the tasks already on the device
-  are copied into the database.
+- **Sync with Notion.** Paste a Notion integration secret and a database link. Tasks are read
+  from and written to that database, so every device connected to it sees the same list.
+- **Keep them on this device.** Tasks stay in the browser's local storage and nothing leaves the
+  device. You can connect Notion later from the settings menu; the tasks already on the device are
+  copied into the database.
 
-The site has no database and no settings of its own. A Notion connection lives in an httpOnly
-cookie on the device that made it; the server reads it on each request to talk to Notion on that
-visitor's behalf and doesn't store it.
+The app has no database or user settings of its own. A Notion connection is kept in an httpOnly
+cookie on the device that made it. The server reads that cookie on each request to talk to Notion
+for that visitor, and doesn't store it.
 
-## What it does
+## Features
 
-- Daily list with previous/next day navigation and a **Today** jump
-- Add (newest first), rename inline, delete
-- **Todo → In Progress → Done**. Ticking a Todo task starts it: it moves up into the **In
-  Progress** section at the top of the day. On an In Progress row, the tick finishes it (with the
-  letter-dissolve) and the back button returns it to Todo. Un-ticking a done task puts it back in
+- A list per day, with previous/next day navigation and a **Today** button
+- Add tasks (newest first), rename them inline and delete them. Deleting asks you to confirm first
+- **Todo → In Progress → Done.** Ticking a Todo task starts it and moves it into the **In
+  Progress** section at the top of the day. Ticking an In Progress task finishes it, after a
+  confirmation prompt; its back button returns it to Todo. Unticking a done task puts it back in
   progress
-- **Time on In Progress rows**: each shows how long it has been worked on (`12m`, `2h 05m`,
-  `1d 3h`), counted only while it's In Progress. The time is split across the days it ran and
-  saved when the task changes state; a task left In Progress overnight keeps running
-- **Carry-over**: opening today moves every unfinished task from earlier days onto today. An In
-  Progress task stays In Progress, with its time on the days it left filed under those days
-- **Move to tomorrow** and **Schedule** onto any later day from a month picker, on Todo and In
-  Progress rows
-- Drag to reorder with the grip, within a section. It uses pointer events, so it works with touch
-  too
+- **Time tracking:** each In Progress task shows how long it has been worked on (`12m`, `2h 05m`,
+  `1d 3h`). Time counts only while a task is In Progress, is split across the days it ran, and
+  keeps running if a task is left In Progress overnight
+- **Carry-over:** opening today moves every unfinished task from earlier days onto today. An In
+  Progress task stays In Progress, and the time it ran on earlier days stays recorded under those
+  days
+- **Move to tomorrow**, or **Schedule** onto any later day from a month picker
+- **Search** the day's tasks from the search button or by pressing `/`. Matching ignores case and
+  accents, and a task must contain every word of the search
+- Drag to reorder within a section, with a mouse or by touch
 - Links in task text are clickable
-- Done tasks filed under a collapsible **Done tasks** section. The progress bar under the head
-  shows done in full colour and in progress in a tint
-- Month **calendar** with done, in progress and pending counts per day
-- **Progress** view: tasks started, done and carried over to a later day, per day, over the last
-  7, 14 or 30 days, with totals and a follow-through rate. Time isn't charted yet; it's recorded
-  in Notion's `Time log` for later
-- Carry-overs, pickups and time are only recorded from the first day a device runs a version that
-  records them. Earlier days show what got done, and a dash rather than a zero for the rest
-- Catppuccin Mocha/Latte, following the device's light/dark setting
+- Done tasks go into a collapsible **Done tasks** section. The progress bar shows done tasks in
+  full colour and in-progress ones in a lighter tint
+- A month **calendar** with the done, in-progress and pending counts for each day
+- A **Progress** view: tasks started, done and carried over, per day, for the last 7, 14 or 30
+  days, with totals and a follow-through rate
+- Light and dark themes (Catppuccin Latte and Mocha) that follow the device's setting
+- Changes show on screen immediately and save in the background. With Notion, a pill shows
+  Syncing/Synced; if a save fails, an error appears and the day is re-read
+- The list refreshes when you return to the tab, and moves to the new day at midnight
+- Can be installed to a phone's home screen
 
-Web-specific:
+Carry-overs, pickups and time are recorded from the first day a device runs a version of the app
+that records them. For earlier days, the Progress view shows what got done and a dash for the
+rest.
 
-- No accounts or passwords. Each device chooses Notion or local storage on first open.
-- Changes appear on screen immediately and save in the background. With Notion, the pill shows
-  Syncing/Synced. If a save fails, an error appears and the day is re-read.
-- The list re-reads when you come back to the tab, and follows the date over midnight.
-- Can be installed to the home screen (manifest + icons).
+## Using Notion
 
-## Setup
+1. Create an integration at
+   [notion.so/profile/integrations](https://www.notion.so/profile/integrations) and copy its
+   **Internal Integration Secret**.
+2. Open the database you want to use, choose **•••** › **Connections**, and add the integration.
+3. Copy the database's link (**Share** › **Copy link**) and paste it into the app along with the
+   secret.
+
+Any database works. The first time a device uses it, any missing properties are added:
+
+| Property        | Type     | Purpose                                                          |
+| --------------- | -------- | ---------------------------------------------------------------- |
+| (title)         | Title    | The task text                                                    |
+| `Done`          | Checkbox | Kept in step with the status, for views and filters              |
+| `Date`          | Date     | The day the task is on                                           |
+| `Order`         | Number   | Its position in the day                                          |
+| `Status`        | Select   | `Todo`, `In Progress` or `Done`                                  |
+| `Carried from`  | Text     | The days it was carried over from                                |
+| `Started on`    | Text     | The days it was picked up                                        |
+| `Time log`      | Text     | Seconds worked per day, e.g. `2026-09-22:3600 2026-09-23:1200`   |
+| `Running since` | Date     | When the current In Progress run started                         |
+
+If the database already has a Notion **Status** property named `Status`, the app uses its
+To-do / In progress / Complete groups instead of adding a select.
+
+Deleting a task moves its page to the trash in Notion.
+
+## Running it locally
+
+Requires Node.js and npm.
 
 ```bash
 npm install
 npm run dev
 ```
 
-There are no environment variables. Open the site and pick Notion or local storage.
-
-## Deploy (Vercel)
-
-1. Import `devlargs/tasks` in Vercel. The Astro framework preset is detected automatically.
-2. Add the domain `tasks.ralphlargo.com` and point a `CNAME` for `tasks` at `cname.vercel-dns.com`.
+No environment variables are needed. Open the site and choose Notion or local storage.
 
 ## Commands
 
 ```bash
-npm run dev        # dev server
-npm run build      # production build (Vercel adapter)
+npm run dev        # development server
+npm run build      # production build
+npm run preview    # serve the production build
 npm run typecheck  # astro check
-npm test           # Vitest
+npm test           # unit tests (Vitest)
 ```
 
-## Layout
+## Deploying
 
-- `src/lib/tasksLogic.ts`: pure day/order/carry-over, status and time-tracking logic, first ported
-  from Largs Hub's old desktop Todo
+The project is an [Astro](https://astro.build) site with server routes, built with the Vercel
+adapter.
+
+1. Import the repository into [Vercel](https://vercel.com). The Astro preset is detected
+   automatically.
+2. Set `site` in `astro.config.mjs` to the URL you'll serve it from.
+3. Optionally add a custom domain in the Vercel project settings.
+
+To host it somewhere else, swap `@astrojs/vercel` for another
+[Astro adapter](https://docs.astro.build/en/guides/on-demand-rendering/).
+
+Notion secrets pass through the server you deploy (in a cookie, on each request), so only
+connect Notion to a deployment you trust.
+
+## Project layout
+
+- `src/lib/tasksLogic.ts`: pure logic for days, ordering, carry-over, status changes and time
+  tracking
 - `src/lib/localBackend.ts`: the same task operations on the device's local storage
-- `src/lib/server/`: the visitor's Notion connection (cookie), Notion client and task operations
-  (server-only; the page's scripts never see the secret)
-- `src/pages/api/`: JSON routes the page calls, plus `connect`, `disconnect` and `tasks/import`
-- `src/components/setup/`: the first-open choice and the Notion connect form
-- `src/components/todo/`: the React island, first ported from Largs Hub's old desktop Todo
-- `src/middleware.ts`: same-origin check for writes
+- `src/lib/server/`: the Notion connection cookie, the Notion client and task operations. Runs
+  on the server only; the page's scripts never see the secret
+- `src/pages/api/`: the JSON routes the page calls, including `connect`, `disconnect` and
+  `tasks/import`
+- `src/components/setup/`: the first-run choice and the Notion connection form
+- `src/components/todo/`: the task list UI (a React island)
+- `src/middleware.ts`: same-origin check for write requests
+- `test/`: unit tests
+
+## Contributing
+
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+[MIT](LICENSE). You're free to use, modify and redistribute it, including in your own projects.

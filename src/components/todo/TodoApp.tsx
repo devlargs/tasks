@@ -11,17 +11,21 @@ import {
   MdAdd,
   MdChevronLeft,
   MdChevronRight,
+  MdClose,
   MdExpandMore,
   MdInsights,
   MdOutlineCalendarMonth,
   MdOutlineSettings,
   MdRefresh,
+  MdSearch,
 } from "react-icons/md";
 import type { TaskBackend } from "../../lib/api";
 import { changeStatus, restoreTask } from "../../lib/tasksLogic";
 import { carryTrackingSince, pickupTrackingSince } from "../../lib/tracking";
 import type { TaskStatus, TodoTask } from "../../lib/types";
 import { dissolveDurationMs } from "./dissolve";
+import ConfirmDialog from "./ConfirmDialog";
+import { matchesSearch, searchTerms } from "./search";
 import TaskRow from "./TaskRow";
 import TodoCalendar from "./TodoCalendar";
 import TodoStats from "./TodoStats";
@@ -161,6 +165,19 @@ export default function TodoApp({
   // letters have gone, so the row doesn't vanish out from under the animation.
   const [dissolvingId, setDissolvingId] = useState<string | null>(null);
   const [showDone, setShowDone] = useState(false);
+  // The search field is tucked away until asked for; the query outlives a day
+  // change, so the same search can be run down the days
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  // Done matches show open during a search, without touching the list's own
+  // Done toggle; a new query opens them again
+  const [searchDoneOpen, setSearchDoneOpen] = useState(true);
+  // Finishing and deleting a task each ask first — both are one stray click
+  // from the row's other buttons
+  const [confirming, setConfirming] = useState<{
+    action: "done" | "delete";
+    task: TodoTask;
+  } | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   // A row whose checkbox had focus when its task changed section; the focus
@@ -168,6 +185,7 @@ export default function TodoApp({
   const refocusId = useRef<string | null>(null);
 
   const composerRef = useRef<HTMLInputElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const prevRects = useRef(new Map<string, DOMRect>());
@@ -189,6 +207,56 @@ export default function TodoApp({
   const openCount = progressTasks.length + todoTasks.length;
   const progress = ordered.length === 0 ? 0 : doneCount / ordered.length;
   const started = ordered.length === 0 ? 0 : progressTasks.length / ordered.length;
+
+  // What the list shows. The full sections above still drive the counts, the
+  // progress bar and reordering; these only decide which rows are on screen.
+  const terms = useMemo(() => searchTerms(query), [query]);
+  const filtering = terms.length > 0;
+  const shownProgress = useMemo(
+    () => progressTasks.filter((t) => matchesSearch(t.text, terms)),
+    [progressTasks, terms],
+  );
+  const shownTodo = useMemo(
+    () => todoTasks.filter((t) => matchesSearch(t.text, terms)),
+    [todoTasks, terms],
+  );
+  const shownDone = useMemo(
+    () => doneTasks.filter((t) => matchesSearch(t.text, terms)),
+    [doneTasks, terms],
+  );
+  const shownCount = shownProgress.length + shownTodo.length + shownDone.length;
+  // A match among the done tasks shouldn't hide behind the collapsed section
+  const doneExpanded = filtering ? searchDoneOpen : showDone;
+  const toggleDone = () =>
+    filtering ? setSearchDoneOpen(!doneExpanded) : setShowDone(!doneExpanded);
+
+  useEffect(() => {
+    setSearchDoneOpen(true);
+  }, [query]);
+
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setQuery("");
+  }, []);
+
+  // "/" jumps to the search from anywhere on the list, unless you're typing
+  useEffect(() => {
+    if (view !== "list") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("input, textarea, [contenteditable='true']")) return;
+      e.preventDefault();
+      setSearchOpen(true);
+      searchRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [view]);
+
+  useEffect(() => {
+    if (searchOpen) searchRef.current?.focus();
+  }, [searchOpen]);
 
   // Pickups and time are recorded from the first day this device runs a
   // version that records them; the Progress view needs to know which day that
@@ -324,7 +392,7 @@ export default function TodoApp({
     for (const id of [...prevRects.current.keys()]) {
       if (!seen.has(id)) prevRects.current.delete(id);
     }
-  }, [progressTasks, todoTasks, doneTasks, showDone]);
+  }, [shownProgress, shownTodo, shownDone, doneExpanded]);
 
   // Collapse a row to nothing before it leaves the list, so the gap closes
   // instead of snapping shut.
@@ -685,12 +753,16 @@ export default function TodoApp({
         task={task}
         dissolving={dissolvingId === task.id}
         reorderable={reorderable}
-        onToggle={() => void handleStatus(task, NEXT_STATUS[task.status])}
+        onToggle={() =>
+          NEXT_STATUS[task.status] === "done"
+            ? setConfirming({ action: "done", task })
+            : void handleStatus(task, NEXT_STATUS[task.status])
+        }
         onBack={task.status === "inProgress" ? () => void handleStatus(task, "todo") : undefined}
         onRename={(text) => void handleRename(task, text)}
         onDefer={task.done ? undefined : () => void moveOff(task, shiftDateKey(task.date, 1))}
         onSchedule={task.done ? undefined : (toDate) => void moveOff(task, toDate)}
-        onDelete={() => void handleDelete(task)}
+        onDelete={() => setConfirming({ action: "delete", task })}
         onDragStart={(e) => startDrag(task, e)}
         dragging={draggingId === task.id}
         dropTarget={dropTargetId === task.id && draggingId !== task.id}
@@ -768,6 +840,16 @@ export default function TodoApp({
                 aria-label="Next day"
               >
                 <MdChevronRight size={18} />
+              </button>
+              <button
+                onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+                className="todo-daynav flex items-center justify-center rounded-full cursor-pointer hover:bg-sidebar-hover"
+                style={{ ...chromeButton, color: searchOpen ? "var(--accent)" : undefined }}
+                title="Search tasks (/)"
+                aria-label="Search tasks"
+                aria-expanded={searchOpen}
+              >
+                <MdSearch size={16} />
               </button>
               <button
                 onClick={() => setView("calendar")}
@@ -896,6 +978,53 @@ export default function TodoApp({
               Add
             </button>
           </form>
+
+          {searchOpen && (
+            <div className="todo-search flex items-center rounded-lg" role="search">
+              <MdSearch size={16} className="shrink-0" style={{ color: "var(--text-muted)" }} />
+              <input
+                ref={searchRef}
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    closeSearch();
+                  }
+                }}
+                placeholder="Search this day's tasks"
+                aria-label="Search tasks"
+                enterKeyHint="search"
+                className="flex-1 min-w-0 outline-none"
+                style={{
+                  fontSize: "var(--text-sm)",
+                  color: "var(--text-primary)",
+                  background: "transparent",
+                  border: "none",
+                }}
+              />
+              {filtering && (
+                <span
+                  className="todo-figure shrink-0"
+                  aria-live="polite"
+                  style={{ fontSize: "var(--text-2xs)", color: "var(--text-muted)" }}
+                >
+                  {shownCount} of {ordered.length}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={closeSearch}
+                className="todo-daynav shrink-0 flex items-center justify-center rounded-full cursor-pointer hover:bg-sidebar-hover"
+                style={{ ...chromeButton, width: 24, height: 24 }}
+                title="Close search (Esc)"
+                aria-label="Close search"
+              >
+                <MdClose size={14} />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* The head's bottom edge doubles as the day's progress: done in full
@@ -952,24 +1081,35 @@ export default function TodoApp({
           >
             {/* One keyed list for both open sections, so a row moving between
                 them is the same element travelling, not a new one appearing */}
+            {/* A filtered list can't be reordered: a drop between two matches
+                says nothing about where the hidden rows should go. */}
             {[
-              progressTasks.length > 0 && (
+              shownProgress.length > 0 && (
                 <h2 key="head-progress" className="todo-section-head todo-section-head-first">
                   <span>In Progress</span>
-                  <span className="todo-figure todo-done-count">{progressTasks.length}</span>
+                  <span className="todo-figure todo-done-count">{shownProgress.length}</span>
                 </h2>
               ),
-              ...progressTasks.map((task) => renderRow(task, true)),
-              progressTasks.length > 0 && todoTasks.length > 0 && (
+              ...shownProgress.map((task) => renderRow(task, !filtering)),
+              shownProgress.length > 0 && shownTodo.length > 0 && (
                 <h2 key="head-todo" className="todo-section-head">
                   <span>Todo</span>
-                  <span className="todo-figure todo-done-count">{todoTasks.length}</span>
+                  <span className="todo-figure todo-done-count">{shownTodo.length}</span>
                 </h2>
               ),
-              ...todoTasks.map((task) => renderRow(task, true)),
+              ...shownTodo.map((task) => renderRow(task, !filtering)),
             ]}
 
-            {openCount === 0 && (
+            {filtering && shownCount === 0 && (
+              <p
+                className="todo-empty"
+                style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}
+              >
+                No tasks match “{query.trim()}”.
+              </p>
+            )}
+
+            {!filtering && openCount === 0 && (
               <p
                 className="todo-empty"
                 style={{ fontSize: "var(--text-sm)", color: "var(--text-muted)" }}
@@ -984,23 +1124,23 @@ export default function TodoApp({
 
             {/* Finished work is filed, not crossed out — a struck-through label
                 is still a full row of text to read past. */}
-            {doneCount > 0 && (
+            {shownDone.length > 0 && (
               <>
                 <button
-                  onClick={() => setShowDone((v) => !v)}
-                  aria-expanded={showDone}
+                  onClick={toggleDone}
+                  aria-expanded={doneExpanded}
                   className="todo-done-toggle flex items-center w-full cursor-pointer"
                 >
                   <MdExpandMore
                     size={17}
-                    className={`todo-done-caret shrink-0 ${showDone ? "todo-done-caret-open" : ""}`}
+                    className={`todo-done-caret shrink-0 ${doneExpanded ? "todo-done-caret-open" : ""}`}
                   />
                   <span>Done tasks</span>
-                  <span className="todo-figure todo-done-count">{doneCount}</span>
+                  <span className="todo-figure todo-done-count">{shownDone.length}</span>
                 </button>
-                {showDone && (
+                {doneExpanded && (
                   <div className="todo-done-list">
-                    {doneTasks.map((task) => renderRow(task, false))}
+                    {shownDone.map((task) => renderRow(task, false))}
                   </div>
                 )}
               </>
@@ -1008,6 +1148,30 @@ export default function TodoApp({
           </div>
         </div>
       </div>
+
+      {confirming && (
+        <ConfirmDialog
+          title={confirming.action === "done" ? "Mark this task as done?" : "Delete this task?"}
+          confirmLabel={confirming.action === "done" ? "Mark as done" : "Delete"}
+          destructive={confirming.action === "delete"}
+          onConfirm={() => {
+            const { action, task } = confirming;
+            setConfirming(null);
+            if (action === "done") void handleStatus(task, "done");
+            else void handleDelete(task);
+          }}
+          onCancel={() => setConfirming(null)}
+        >
+          <p className="todo-confirm-task">{confirming.task.text}</p>
+          {confirming.action === "delete" && (
+            <p>
+              {mode === "notion"
+                ? "Its page goes to the trash in Notion."
+                : "This can't be undone."}
+            </p>
+          )}
+        </ConfirmDialog>
+      )}
     </div>
   );
 }

@@ -104,6 +104,69 @@
   opacity: 1;
 }
 
+/* --- Theme switch (settings menu) --------------------------------------- */
+
+/* Hallmark · component: segmented switch · genre: modern-minimal
+ * theme: existing Catppuccin tokens · no new colours or fonts
+ * states: default · hover · focus · active · checked
+ *   (no disabled, loading or error state: the switch is local and instant, and
+ *    blocked storage still themes the page for the visit)
+ * contrast: pass — checked text-primary on sidebar-hover, idle text-secondary
+ *   on context-bg, both themes ≥ 4.5:1
+ * The Progress range's pill, a size down, so a two-way choice reads the same
+ * wherever the app offers one. */
+
+.todo-theme {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-2xs) var(--space-xs) var(--space-xs) var(--space-sm);
+  margin-bottom: 4px;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.todo-theme-switch {
+  display: inline-flex;
+  gap: var(--space-3xs);
+  padding: var(--space-3xs);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 9999px;
+}
+
+.todo-theme-option {
+  padding: var(--space-3xs) var(--space-sm);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 9999px;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-micro) var(--ease-out),
+    color var(--dur-micro) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .todo-theme-option:hover {
+    color: var(--text-primary);
+  }
+}
+
+.todo-theme-option[aria-checked="true"] {
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--sidebar-hover);
+}
+
+/* The page's ring, shaped to the pill */
+.todo-page .todo-theme-option:focus-visible {
+  border-radius: 9999px;
+}
+
 /* --- Confirm dialog ------------------------------------------------------ */
 
 /* The same floating surface as the schedule picker. The <dialog> itself is
@@ -479,46 +542,15 @@
   color: var(--accent);
 }
 
-/* --- Done section: filed, not crossed out -------------------------------- */
+/* --- Sections: In Progress, Todo, Done ------------------------------------ */
 
-.todo-done-toggle {
-  gap: var(--space-2xs);
-  padding: var(--space-sm);
-  margin-top: var(--space-2xs);
-  font-size: var(--text-sm);
-  color: var(--text-secondary);
-  background: transparent;
-  border: none;
-  border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
-  transition: color var(--dur-micro) var(--ease-out);
-}
-
-.todo-done-toggle:hover,
-.todo-done-toggle:focus-visible {
-  color: var(--text-primary);
-}
-
-.todo-done-caret {
-  /* Points right when closed, down when open */
-  transform: rotate(-90deg);
-  transition: transform var(--dur-short) var(--ease-out);
-}
-
-.todo-done-caret-open {
-  transform: rotate(0deg);
-}
-
-/* In Progress and Todo headings: the Done toggle's voice, without the caret
-   or the hover, since they don't open or close anything */
+/* Each heading is its section's toggle: a caret, the name, the count. Done
+   starts closed — finished work is filed, not crossed out, since a
+   struck-through label is still a full row of text to read past. */
 .todo-section-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2xs);
-  padding: var(--space-sm);
   margin-top: var(--space-2xs);
   font-size: var(--text-sm);
   font-weight: 400;
-  color: var(--text-secondary);
   border-top: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
 }
 
@@ -526,12 +558,51 @@
 .todo-section-head-first {
   margin-top: 0;
   border-top: none;
+}
+
+.todo-section-toggle {
+  gap: var(--space-2xs);
+  padding: var(--space-sm);
+  font: inherit;
+  text-align: left;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  transition: color var(--dur-micro) var(--ease-out);
+}
+
+.todo-section-head-first .todo-section-toggle {
   padding-top: 0;
 }
 
-.todo-done-count {
+@media (hover: hover) {
+  .todo-section-toggle:hover {
+    color: var(--text-primary);
+  }
+}
+
+.todo-section-toggle:focus-visible {
+  color: var(--text-primary);
+}
+
+.todo-section-caret {
+  /* Points right when closed, down when open */
+  transform: rotate(-90deg);
+  transition: transform var(--dur-short) var(--ease-out);
+}
+
+.todo-section-caret-open {
+  transform: rotate(0deg);
+}
+
+.todo-section-count {
   font-size: var(--text-2xs);
   color: var(--text-muted);
+}
+
+/* Rows of a section just opened arrive the way the Done list does */
+.todo-row-revealed {
+  animation: todo-done-open var(--dur-short) var(--ease-out);
 }
 
 .todo-done-list {
@@ -930,6 +1001,7 @@
   .todo-composer,
   .todo-composer-hint,
   .todo-search,
+  .todo-theme-option,
   .todo-progress-fill,
   .todo-progress-started,
   .todo-check-half,
@@ -943,7 +1015,8 @@
     transform: none;
   }
 
-  .todo-done-caret {
+  .todo-section-caret,
+  .todo-section-toggle {
     transition: none !important;
   }
 
@@ -952,6 +1025,7 @@
   .todo-day-next,
   .todo-day-prev,
   .todo-done-list,
+  .todo-row-revealed,
   .todo-pill-syncing,
   .todo-running-dot,
   .todo-picker,

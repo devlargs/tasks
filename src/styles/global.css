@@ -1,8 +1,10 @@
 @import "tailwindcss";
 
 /* Largs Hub's Catppuccin palette (src/index.css there), so the web list looks
-   like the one on the desktop. Mocha by default; Latte when the device is in
-   light mode — there's no in-app theme switch to follow here. */
+   like the one on the desktop. Mocha by default; Latte once someone picks Light
+   in the settings menu. The choice sits on <html data-theme>, set before the
+   first paint (layouts/Layout.astro); the device's own light/dark setting isn't
+   consulted. */
 :root {
   color-scheme: dark;
   --sidebar: #1e1e2e;
@@ -30,29 +32,37 @@
   --chart-carried: #d47a45;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color-scheme: light;
-    --sidebar: #e6e9ef;
-    --sidebar-hover: #ccd0da;
-    --sidebar-active: #bcc0cc;
-    --surface: #eff1f5;
-    --accent: #1e66f5;
-    --panel: #dce0e8;
-    --border: #ccd0da;
-    --text-primary: #4c4f69;
-    --text-secondary: #5c5f77;
-    --text-muted: #8c8fa1;
-    --context-bg: #e6e9ef;
-    --context-hover: #ccd0da;
+:root[data-theme="light"] {
+  color-scheme: light;
+  --sidebar: #e6e9ef;
+  --sidebar-hover: #ccd0da;
+  --sidebar-active: #bcc0cc;
+  --surface: #eff1f5;
+  --accent: #1e66f5;
+  --panel: #dce0e8;
+  --border: #ccd0da;
+  --text-primary: #4c4f69;
+  --text-secondary: #5c5f77;
+  --text-muted: #8c8fa1;
+  --context-bg: #e6e9ef;
+  --context-hover: #ccd0da;
 
-    --success: #40a02b;
-    --danger: #d20f39;
-    --warning: #df8e1d;
+  --success: #40a02b;
+  --danger: #d20f39;
+  --warning: #df8e1d;
 
-    --chart-done: #1e66f5;
-    --chart-carried: #d9530b;
-  }
+  --chart-done: #1e66f5;
+  --chart-carried: #d9530b;
+}
+
+/* Switching theme swaps every colour at once. The rows, the composer and the
+   checkboxes each ease their own colours, at their own speeds, which would
+   smear the swap across a quarter of a second; ThemeSwitch sets this for the
+   one frame the swap takes. */
+:root[data-theme-switching] *,
+:root[data-theme-switching] *::before,
+:root[data-theme-switching] *::after {
+  transition: none !important;
 }
 
 /* --- Scales (same as Largs Hub) -------------------------------------------- */

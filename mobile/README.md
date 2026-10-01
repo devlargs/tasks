@@ -1,56 +1,58 @@
-# Welcome to your Expo app 👋
+# Tasks — mobile
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+The iOS and Android version of [Tasks](../README.md): a daily task list that carries unfinished
+work forward. It does everything the web app does, built with [Expo](https://expo.dev) and React
+Native.
 
-## Get started
+The first time it opens, it asks where to keep your tasks:
 
-1. Install dependencies
+- **Sync with Notion.** Paste a Notion integration secret and a database link, as on the web. The
+  phone talks to the Notion API directly; the secret is kept in the platform's secure storage
+  (Keychain on iOS, Keystore on Android) and never goes anywhere but Notion. The web app and the
+  phone can share one database.
+- **Keep them on this device.** Tasks stay in the app's local storage (`expo-sqlite`'s key-value
+  store). You can connect Notion later from the settings menu; the tasks already on the phone are
+  copied into the database.
 
-   ```bash
-   npm install
-   ```
+## Features
 
-2. Start the app
+The same as the web app: a list per day with Todo → In Progress → Done, time tracking, carry-over,
+move to tomorrow, schedule onto a later day, search, drag to reorder (with the grip), In Progress /
+Todo / Done sections that open and close from their headings, clickable links, confirmation before finishing or deleting a task, the month calendar, the Progress view,
+and the dark/light theme switch in the settings menu (Catppuccin Mocha by default, Latte when you
+pick Light).
 
-   ```bash
-   npx expo start
-   ```
+Differences that come from being on a phone:
 
-In the output, you'll find options to open the app in a
+- No keyboard shortcuts (`/` for search, Escape to close).
+- The Progress chart has no hover: tap a day to see its numbers, tap it again to open it.
+- The list refreshes when the app comes back to the foreground.
+- Notion mode doesn't work in the Expo web build: the Notion API blocks browsers (CORS), which is
+  why the web app goes through its own server. Use the main web app in a browser.
 
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Running it
 
 ```bash
-npm run reset-project
+npm install
+npx expo start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Then open it in Expo Go, an iOS simulator (`i`) or an Android emulator (`a`). Every native module
+it uses (`expo-sqlite`, `expo-secure-store`, `expo-crypto`, `react-native-svg`) is included in
+Expo Go.
 
-### Other setup steps
+## Checks
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+```bash
+npx tsc --noEmit
+npx expo lint
+```
 
-## Learn more
+## Layout
 
-To learn more about developing your project with Expo, look at the following resources:
-
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+- `src/app/`: Expo Router routes (one screen)
+- `src/lib/`: task logic, the local and Notion backends, the Notion client, device storage. Several
+  files are identical copies of the web's; see `../CLAUDE.md` for which.
+- `src/components/setup/`: the first-run choice and the Notion connection form
+- `src/components/todo/`: the list, its rows, the schedule picker, calendar and Progress view
+- `src/components/theme.ts`: the palette and scales from the web's `global.css`

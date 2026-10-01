@@ -1,5 +1,6 @@
 ---
 import "../styles/global.css";
+import { THEME_KEY, THEME_SURFACE } from "../lib/themeChoice";
 
 interface Props {
   title: string;
@@ -14,8 +15,20 @@ const { title } = Astro.props;
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="robots" content="noindex, nofollow" />
-    <meta name="theme-color" content="#181825" media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content="#eff1f5" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content={THEME_SURFACE.dark} />
+    {
+      /* The device's theme choice, applied before the first paint so a light
+         page never flashes dark on its way in. Dark unless Light was picked;
+         blocked storage just means dark. ThemeSwitch keeps both in step after. */
+    }
+    <script is:inline define:vars={{ key: THEME_KEY, surfaces: THEME_SURFACE }}>
+      let theme = "dark";
+      try {
+        if (localStorage.getItem(key) === "light") theme = "light";
+      } catch {}
+      document.documentElement.dataset.theme = theme;
+      document.querySelector('meta[name="theme-color"]')?.setAttribute("content", surfaces[theme]);
+    </script>
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Tasks" />

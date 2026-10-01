@@ -33,12 +33,15 @@ for that visitor, and doesn't store it.
   accents, and a task must contain every word of the search
 - Drag to reorder within a section, with a mouse or by touch
 - Links in task text are clickable
-- Done tasks go into a collapsible **Done tasks** section. The progress bar shows done tasks in
-  full colour and in-progress ones in a lighter tint
+- **In Progress**, **Todo** and **Done tasks** each open and close from their heading, which keeps
+  its count while closed. Done starts closed. A task that's started, put back or added opens its
+  section, and a search shows every section open. The progress bar shows done tasks in full colour
+  and in-progress ones in a lighter tint
 - A month **calendar** with the done, in-progress and pending counts for each day
 - A **Progress** view: tasks started, done and carried over, per day, for the last 7, 14 or 30
   days, with totals and a follow-through rate
-- Light and dark themes (Catppuccin Latte and Mocha) that follow the device's setting
+- Dark and light themes (Catppuccin Mocha and Latte), dark by default, switched from the settings
+  menu and remembered on each device
 - Changes show on screen immediately and save in the background. With Notion, a pill shows
   Syncing/Synced; if a save fails, an error appears and the day is re-read
 - The list refreshes when you return to the tab, and moves to the new day at midnight
@@ -126,6 +129,8 @@ connect Notion to a deployment you trust.
 - `src/components/todo/`: the task list UI (a React island)
 - `src/middleware.ts`: same-origin check for write requests
 - `test/`: unit tests
+- `mobile/`: the iOS and Android app (Expo), with the same features. See
+  [mobile/README.md](mobile/README.md)
 
 ## Contributing
 

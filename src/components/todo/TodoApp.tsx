@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -27,6 +28,7 @@ import { dissolveDurationMs } from "./dissolve";
 import ConfirmDialog from "./ConfirmDialog";
 import { matchesSearch, searchTerms } from "./search";
 import TaskRow from "./TaskRow";
+import ThemeSwitch from "./ThemeSwitch";
 import TodoCalendar from "./TodoCalendar";
 import TodoStats from "./TodoStats";
 import {
@@ -126,6 +128,15 @@ const byOrder = (tasks: TodoTask[]): TodoTask[] => [...tasks].sort((a, b) => a.o
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+// The three sections, each under a heading that opens and closes it
+const SECTION_LABEL: Record<TaskStatus, string> = {
+  inProgress: "In Progress",
+  todo: "Todo",
+  done: "Done tasks",
+};
+
+const ALL_SECTIONS_OPEN: Record<TaskStatus, boolean> = { inProgress: true, todo: true, done: true };
+
 // Which way the checkbox moves a task
 const NEXT_STATUS: Record<TaskStatus, TaskStatus> = {
   todo: "inProgress",
@@ -160,18 +171,32 @@ export default function TodoApp({
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  // The menu hangs from the settings button's right edge. On a narrow screen
+  // the controls wrap under the day, where that would push it off the page, so
+  // it's slid back inside the viewport by however much it overhangs.
+  const [menuShift, setMenuShift] = useState(0);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [enteringIds, setEnteringIds] = useState<string[]>([]);
   // The task whose label is mid-dissolve; it stays in the open list until the
   // letters have gone, so the row doesn't vanish out from under the animation.
   const [dissolvingId, setDissolvingId] = useState<string | null>(null);
-  const [showDone, setShowDone] = useState(false);
+  // Which sections are open. In Progress and Todo start open; Done starts
+  // closed, since finished work is filed away rather than read past.
+  const [sectionsOpen, setSectionsOpen] = useState<Record<TaskStatus, boolean>>({
+    inProgress: true,
+    todo: true,
+    done: false,
+  });
   // The search field is tucked away until asked for; the query outlives a day
   // change, so the same search can be run down the days
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
-  // Done matches show open during a search, without touching the list's own
-  // Done toggle; a new query opens them again
-  const [searchDoneOpen, setSearchDoneOpen] = useState(true);
+  // During a search every section shows open, so no match hides behind a
+  // closed one — without touching the list's own state. A new query opens
+  // them all again.
+  const [searchSectionsOpen, setSearchSectionsOpen] = useState(ALL_SECTIONS_OPEN);
+  // The section just opened by hand, whose rows ease in as they appear
+  const [revealed, setRevealed] = useState<TaskStatus | null>(null);
   // Finishing and deleting a task each ask first — both are one stray click
   // from the row's other buttons
   const [confirming, setConfirming] = useState<{
@@ -184,6 +209,7 @@ export default function TodoApp({
   // follows it to where it lands
   const refocusId = useRef<string | null>(null);
 
+  const sectionId = useId();
   const composerRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -225,13 +251,28 @@ export default function TodoApp({
     [doneTasks, terms],
   );
   const shownCount = shownProgress.length + shownTodo.length + shownDone.length;
-  // A match among the done tasks shouldn't hide behind the collapsed section
-  const doneExpanded = filtering ? searchDoneOpen : showDone;
-  const toggleDone = () =>
-    filtering ? setSearchDoneOpen(!doneExpanded) : setShowDone(!doneExpanded);
+  const sections = filtering ? searchSectionsOpen : sectionsOpen;
+
+  const toggleSection = (section: TaskStatus) => {
+    const open = !sections[section];
+    (filtering ? setSearchSectionsOpen : setSectionsOpen)((current) => ({
+      ...current,
+      [section]: open,
+    }));
+    setRevealed(open ? section : null);
+  };
+
+  // A task that lands in a closed section opens it rather than vanishing: one
+  // just started, put back, or added
+  const openSection = useCallback((section: TaskStatus) => {
+    const opened = (current: Record<TaskStatus, boolean>) =>
+      current[section] ? current : { ...current, [section]: true };
+    setSectionsOpen(opened);
+    setSearchSectionsOpen(opened);
+  }, []);
 
   useEffect(() => {
-    setSearchDoneOpen(true);
+    setSearchSectionsOpen(ALL_SECTIONS_OPEN);
   }, [query]);
 
   const closeSearch = useCallback(() => {
@@ -370,6 +411,26 @@ export default function TodoApp({
   // put back, neighbours closing a gap) slide from where they were instead of
   // jumping.
   useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!menuOpen || !menu) {
+      setMenuShift(0);
+      return;
+    }
+    const MARGIN = 8;
+    const { left, right } = menu.getBoundingClientRect();
+    // Measured where it would sit unshifted
+    const baseLeft = left - menuShift;
+    const baseRight = right - menuShift;
+    const shift =
+      baseLeft < MARGIN
+        ? MARGIN - baseLeft
+        : baseRight > window.innerWidth - MARGIN
+          ? window.innerWidth - MARGIN - baseRight
+          : 0;
+    if (shift !== menuShift) setMenuShift(shift);
+  }, [menuOpen, menuShift]);
+
+  useLayoutEffect(() => {
     const refocus = refocusId.current;
     if (refocus) {
       refocusId.current = null;
@@ -392,7 +453,7 @@ export default function TodoApp({
     for (const id of [...prevRects.current.keys()]) {
       if (!seen.has(id)) prevRects.current.delete(id);
     }
-  }, [shownProgress, shownTodo, shownDone, doneExpanded]);
+  }, [shownProgress, shownTodo, shownDone, sections]);
 
   // Collapse a row to nothing before it leaves the list, so the gap closes
   // instead of snapping shut.
@@ -468,6 +529,7 @@ export default function TodoApp({
     if (!text) return;
     setDraft("");
     setError(null);
+    openSection("todo");
     const tempId = `${TEMP_PREFIX}${crypto.randomUUID()}`;
     const targetDate = date;
     // Newest first, matching the order the server will store
@@ -501,7 +563,7 @@ export default function TodoApp({
         ),
       );
     });
-  }, [api, draft, date, tasks, write]);
+  }, [api, draft, date, tasks, write, openSection]);
 
   // Todo → In Progress → Done, and back. The clock and the task's place in
   // the day follow the same rules the backends apply (changeStatus), so the
@@ -520,8 +582,11 @@ export default function TodoApp({
           await collapseRow(task.id);
           setDissolvingId(null);
         }
-      } else if (rowRefs.current.get(task.id)?.contains(document.activeElement)) {
-        refocusId.current = task.id;
+      } else {
+        openSection(status);
+        if (rowRefs.current.get(task.id)?.contains(document.activeElement)) {
+          refocusId.current = task.id;
+        }
       }
       const now = nowIso();
       setTasks((current) => {
@@ -534,7 +599,7 @@ export default function TodoApp({
       // where it was saved and takes away a clock that never started.
       await request;
     },
-    [api, withId, collapseRow],
+    [api, withId, collapseRow, openSection],
   );
 
   const handleRename = useCallback(
@@ -739,6 +804,30 @@ export default function TodoApp({
     </button>
   );
 
+  // A section's heading is its toggle. The count stays on it when it's closed,
+  // so a closed section still says what's in it.
+  const sectionHead = (section: TaskStatus, count: number, first: boolean) => (
+    <h2
+      key={`head-${section}`}
+      className={`todo-section-head ${first ? "todo-section-head-first" : ""}`}
+    >
+      <button
+        type="button"
+        onClick={() => toggleSection(section)}
+        aria-expanded={sections[section]}
+        aria-controls={section === "done" && sections.done ? `${sectionId}-done` : undefined}
+        className="todo-section-toggle flex items-center w-full cursor-pointer"
+      >
+        <MdExpandMore
+          size={17}
+          className={`todo-section-caret shrink-0 ${sections[section] ? "todo-section-caret-open" : ""}`}
+        />
+        <span>{SECTION_LABEL[section]}</span>
+        <span className="todo-figure todo-section-count">{count}</span>
+      </button>
+    </h2>
+  );
+
   const renderRow = (task: TodoTask, reorderable: boolean) => (
     <div
       key={task.id}
@@ -746,7 +835,14 @@ export default function TodoApp({
         if (el) rowRefs.current.set(task.id, el);
         else rowRefs.current.delete(task.id);
       }}
-      className={`todo-row-wrap ${enteringIds.includes(task.id) ? "todo-row-entering" : ""}`}
+      className={[
+        "todo-row-wrap",
+        enteringIds.includes(task.id) && "todo-row-entering",
+        // Done rows ease in with their whole list (.todo-done-list)
+        revealed === task.status && task.status !== "done" && "todo-row-revealed",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       onAnimationEnd={() => setEnteringIds((ids) => ids.filter((id) => id !== task.id))}
     >
       <TaskRow
@@ -895,8 +991,10 @@ export default function TodoApp({
                   <>
                     <div className="fixed inset-0 z-10" onPointerDown={() => setMenuOpen(false)} />
                     <div
-                      className="absolute right-0 z-20 rounded-lg"
+                      ref={menuRef}
+                      className="absolute z-20 rounded-lg"
                       style={{
+                        right: -menuShift,
                         top: 34,
                         minWidth: 230,
                         padding: "4px 0",
@@ -905,6 +1003,7 @@ export default function TodoApp({
                         boxShadow: "0 4px 16px rgba(0,0,0,0.4)",
                       }}
                     >
+                      <ThemeSwitch />
                       {mode === "notion" && databaseUrl && (
                         <a
                           href={databaseUrl}
@@ -1084,20 +1183,13 @@ export default function TodoApp({
             {/* A filtered list can't be reordered: a drop between two matches
                 says nothing about where the hidden rows should go. */}
             {[
-              shownProgress.length > 0 && (
-                <h2 key="head-progress" className="todo-section-head todo-section-head-first">
-                  <span>In Progress</span>
-                  <span className="todo-figure todo-done-count">{shownProgress.length}</span>
-                </h2>
-              ),
-              ...shownProgress.map((task) => renderRow(task, !filtering)),
-              shownProgress.length > 0 && shownTodo.length > 0 && (
-                <h2 key="head-todo" className="todo-section-head">
-                  <span>Todo</span>
-                  <span className="todo-figure todo-done-count">{shownTodo.length}</span>
-                </h2>
-              ),
-              ...shownTodo.map((task) => renderRow(task, !filtering)),
+              shownProgress.length > 0 && sectionHead("inProgress", shownProgress.length, true),
+              ...(sections.inProgress
+                ? shownProgress.map((task) => renderRow(task, !filtering))
+                : []),
+              shownTodo.length > 0 &&
+                sectionHead("todo", shownTodo.length, shownProgress.length === 0),
+              ...(sections.todo ? shownTodo.map((task) => renderRow(task, !filtering)) : []),
             ]}
 
             {filtering && shownCount === 0 && (
@@ -1126,20 +1218,9 @@ export default function TodoApp({
                 is still a full row of text to read past. */}
             {shownDone.length > 0 && (
               <>
-                <button
-                  onClick={toggleDone}
-                  aria-expanded={doneExpanded}
-                  className="todo-done-toggle flex items-center w-full cursor-pointer"
-                >
-                  <MdExpandMore
-                    size={17}
-                    className={`todo-done-caret shrink-0 ${doneExpanded ? "todo-done-caret-open" : ""}`}
-                  />
-                  <span>Done tasks</span>
-                  <span className="todo-figure todo-done-count">{shownDone.length}</span>
-                </button>
-                {doneExpanded && (
-                  <div className="todo-done-list">
+                {sectionHead("done", shownDone.length, false)}
+                {sections.done && (
+                  <div id={`${sectionId}-done`} className="todo-done-list">
                     {shownDone.map((task) => renderRow(task, false))}
                   </div>
                 )}

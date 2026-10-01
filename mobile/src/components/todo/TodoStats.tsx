@@ -1,11 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useReducedMotion,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { G, Line, Path, Rect, Text as SvgText } from "react-native-svg";
 import type { TaskBackend } from "../../lib/api";
 import { carryTrackingSince, pickupTrackingSince } from "../../lib/tracking";
 import type { TodoDayStats } from "../../lib/types";
-import { figure, mix, space, text, usePalette } from "../theme";
+import { figure, mix, space, text, usePalette, type Palette } from "../theme";
 import { ChromeButton } from "./Chrome";
 import { parseDateKey, todayKey } from "./dates";
 import PageHead from "./PageHead";
@@ -75,6 +84,81 @@ function barPath(x: number, width: number, baseY: number, height: number, up: bo
   ].join(" ");
 }
 
+// The placeholder's column heights while the first answer is on its way, as a
+// share of the space above the baseline. Fixed, so the shape doesn't jump
+// about between renders, and uneven, so it reads as a chart.
+const SKELETON = [0.45, 0.7, 0.35, 0.85, 0.55, 0.3, 0.65];
+// Where the placeholder's baseline sits: a typical day carries over a little
+const SKELETON_BASE = PLOT_HEIGHT * 0.78;
+
+// Before the first answer: the frame and some columns, breathing, where the
+// chart will be
+function SkeletonChart({
+  width,
+  count,
+  palette,
+}: {
+  width: number;
+  count: number;
+  palette: Palette;
+}) {
+  const reduce = useReducedMotion();
+  const pulse = useSharedValue(1);
+  useEffect(() => {
+    if (reduce) return;
+    const ease = Easing.bezier(0.65, 0, 0.35, 1);
+    pulse.set(
+      withRepeat(
+        withSequence(
+          withTiming(0.4, { duration: 700, easing: ease }),
+          withTiming(1, { duration: 700, easing: ease }),
+        ),
+        -1,
+      ),
+    );
+  }, [reduce, pulse]);
+  const style = useAnimatedStyle(() => ({ opacity: pulse.get() }));
+  const slot = (width - AXIS_WIDTH) / count;
+  const barWidth = Math.max(4, Math.min(MAX_BAR, slot * 0.56));
+  const axis = mix(palette.border, 60);
+  return (
+    <Animated.View style={style}>
+      <Svg width={width} height={PLOT_HEIGHT + X_LABEL_BAND}>
+        <Line x1={AXIS_WIDTH} x2={width} y1={0.5} y2={0.5} stroke={axis} strokeWidth={1} />
+        <Line
+          x1={AXIS_WIDTH}
+          x2={width}
+          y1={PLOT_HEIGHT - 0.5}
+          y2={PLOT_HEIGHT - 0.5}
+          stroke={axis}
+          strokeWidth={1}
+        />
+        <Line
+          x1={AXIS_WIDTH}
+          x2={width}
+          y1={SKELETON_BASE}
+          y2={SKELETON_BASE}
+          stroke={palette.border}
+          strokeWidth={1}
+        />
+        {Array.from({ length: count }, (_, i) => (
+          <Path
+            key={i}
+            d={barPath(
+              AXIS_WIDTH + slot * i + (slot - barWidth) / 2,
+              barWidth,
+              SKELETON_BASE - BASELINE_GAP,
+              SKELETON[i % SKELETON.length] * (SKELETON_BASE - BASELINE_GAP),
+              true,
+            )}
+            fill={mix(palette.textMuted, 28)}
+          />
+        ))}
+      </Svg>
+    </Animated.View>
+  );
+}
+
 // Which days get an x-axis label: all of a week, fewer as the range widens,
 // and always today at the right edge
 function labelEvery(count: number): number {
@@ -88,9 +172,10 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
   const [range, setRange] = useState<StatsRange>(14);
   // The last answer, and the range it was for: a new range keeps the previous
   // frame on screen, dimmed, rather than blanking it
-  const [result, setResult] = useState<{ range: string; days: Record<string, TodoDayStats> } | null>(
-    null,
-  );
+  const [result, setResult] = useState<{
+    range: string;
+    days: Record<string, TodoDayStats>;
+  } | null>(null);
   const [settled, setSettled] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [active, setActive] = useState<number | null>(null);
@@ -168,10 +253,12 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
   const startedFill = mix(palette.chartDone, 14);
   const axisLine = mix(palette.border, 60);
 
+  // Before the first answer the figures are unknown, not zero
+  const figureOrDash = (value: number) => (data ? value : "—");
   const tiles = [
-    ["Started", totals.started],
-    ["Done", totals.done],
-    ["Carried over", totals.carried],
+    ["Started", figureOrDash(totals.started)],
+    ["Done", figureOrDash(totals.done)],
+    ["Carried over", figureOrDash(totals.carried)],
     ["Follow-through", percent],
   ] as const;
 
@@ -195,7 +282,12 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
   return (
     <View style={[styles.page, { backgroundColor: palette.surface }]}>
       <PageHead title="Progress" subtitle={`The last ${range} days, up to today`}>
-        <ChromeButton icon="checklist" label="Back to the list" palette={palette} onPress={onClose} />
+        <ChromeButton
+          icon="checklist"
+          label="Back to the list"
+          palette={palette}
+          onPress={onClose}
+        />
       </PageHead>
 
       <ScrollView
@@ -205,38 +297,53 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
         ]}
       >
         <View style={styles.measure}>
-          {/* The one filter, above everything it scopes */}
-          <View
-            style={[styles.range, { borderColor: mix(palette.border, 70) }]}
-            accessibilityRole="radiogroup"
-            accessibilityLabel="Range"
-          >
-            {STATS_RANGES.map((option) => (
-              <Pressable
-                key={option}
-                accessibilityRole="radio"
-                accessibilityState={{ checked: range === option }}
-                onPress={() => {
-                  setActive(null);
-                  setRange(option);
-                }}
-                style={[
-                  styles.rangeOption,
-                  range === option && { backgroundColor: palette.sidebarHover },
-                ]}
-              >
-                <Text
+          {/* The one filter, above everything it scopes, and beside it whether
+              its numbers are still on their way */}
+          <View style={styles.toolbar}>
+            <View
+              style={[styles.range, { borderColor: mix(palette.border, 70) }]}
+              accessibilityRole="radiogroup"
+              accessibilityLabel="Range"
+            >
+              {STATS_RANGES.map((option) => (
+                <Pressable
+                  key={option}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: range === option }}
+                  onPress={() => {
+                    setActive(null);
+                    setRange(option);
+                  }}
                   style={[
-                    styles.rangeText,
-                    range === option
-                      ? { color: palette.textPrimary, fontWeight: "600" }
-                      : { color: palette.textSecondary },
+                    styles.rangeOption,
+                    range === option && { backgroundColor: palette.sidebarHover },
                   ]}
                 >
-                  {option} days
-                </Text>
-              </Pressable>
-            ))}
+                  <Text
+                    style={[
+                      styles.rangeText,
+                      range === option
+                        ? { color: palette.textPrimary, fontWeight: "600" }
+                        : { color: palette.textSecondary },
+                    ]}
+                  >
+                    {option} days
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            {/* Mounted while empty, so the message is announced when it arrives
+                and the row doesn't jump when it goes */}
+            <View style={styles.loading} accessibilityLiveRegion="polite">
+              {loading && (
+                <>
+                  <ActivityIndicator size="small" color={palette.textMuted} />
+                  <Text style={[styles.loadingText, { color: palette.textSecondary }]}>
+                    Loading the last {range} days…
+                  </Text>
+                </>
+              )}
+            </View>
           </View>
 
           {error && (
@@ -260,8 +367,8 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
               ))}
             </View>
             <Text style={[styles.hint, { color: palette.textSecondary }]}>
-              Follow-through is the share of each day&apos;s tasks that got done that day instead
-              of moving to a later one.
+              Follow-through is the share of each day&apos;s tasks that got done that day instead of
+              moving to a later one.
             </Text>
 
             <View style={styles.legend} importantForAccessibility="no-hide-descendants">
@@ -306,8 +413,17 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
               onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
               accessible
               accessibilityRole="image"
-              accessibilityLabel={`Tasks started, done and carried over per day, the last ${range} days. ${totals.started} started, ${totals.done} done, ${totals.carried} carried over.`}
+              accessibilityLabel={
+                data
+                  ? `Tasks started, done and carried over per day, the last ${range} days. ${totals.started} started, ${totals.done} done, ${totals.carried} carried over.`
+                  : "Progress chart, loading"
+              }
             >
+              {/* Only while the first answer is on its way — after a failure
+                  the error says what happened */}
+              {width > 0 && !data && loading && (
+                <SkeletonChart width={width} count={rows.length} palette={palette} />
+              )}
               {width > 0 && data && (
                 <Svg width={width} height={PLOT_HEIGHT + X_LABEL_BAND}>
                   {/* Axis: the two extremes and the baseline, nothing between */}
@@ -587,12 +703,28 @@ const styles = StyleSheet.create({
     maxWidth: 620,
     alignSelf: "center",
   },
+  toolbar: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    columnGap: space.md,
+    rowGap: space.xs,
+    marginBottom: space.lg,
+  },
+  loading: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.xs,
+    minHeight: 20,
+  },
+  loadingText: {
+    fontSize: text.xs,
+  },
   range: {
     flexDirection: "row",
     alignSelf: "flex-start",
     gap: space["3xs"],
     padding: space["3xs"],
-    marginBottom: space.lg,
     borderWidth: 1,
     borderRadius: 9999,
   },

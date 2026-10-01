@@ -1051,11 +1051,19 @@
    them: values and labels stay in the text tokens, the coloured mark beside
    them carries which series it is. */
 
+/* The range and, beside it, whether its numbers are still loading */
+.todo-stats-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs) var(--space-md);
+  margin-bottom: var(--space-lg);
+}
+
 .todo-stats-range {
   display: inline-flex;
   gap: var(--space-3xs);
   padding: var(--space-3xs);
-  margin-bottom: var(--space-lg);
   border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   border-radius: 9999px;
 }
@@ -1084,6 +1092,43 @@
   font-weight: 600;
   color: var(--text-primary);
   background: var(--sidebar-hover);
+}
+
+/* An empty live region stays mounted, so the message is announced when it
+   arrives and the row doesn't jump when it goes */
+.todo-stats-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-height: 1lh;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
+.todo-stats-spinner {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border: 1.5px solid color-mix(in srgb, var(--text-muted) 45%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 999px;
+  animation: todo-spin 0.8s linear infinite;
+}
+
+@keyframes todo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The placeholder chart: the frame, and columns in the muted ink, breathing */
+.todo-stats-skeleton {
+  display: block;
+  animation: todo-pulse 1.4s var(--ease-in-out) infinite;
+}
+
+.todo-stats-skeleton-bar {
+  fill: color-mix(in srgb, var(--text-muted) 28%, transparent);
 }
 
 .todo-stats-error {
@@ -1342,6 +1387,15 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* The words carry the state; nothing turns or breathes */
+  .todo-stats-spinner {
+    display: none;
+  }
+
+  .todo-stats-skeleton {
+    animation: none;
+  }
+
   .todo-stats-body,
   .todo-stats-range-option,
   .todo-stats-bar-started,

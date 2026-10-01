@@ -73,6 +73,13 @@ function barPath(x: number, width: number, baseY: number, height: number, up: bo
   ].join(" ");
 }
 
+// The placeholder's column heights while the first answer is on its way, as a
+// share of the space above the baseline. Fixed, so the shape doesn't jump
+// about between renders, and uneven, so it reads as a chart.
+const SKELETON = [0.45, 0.7, 0.35, 0.85, 0.55, 0.3, 0.65];
+// Where the placeholder's baseline sits: a typical day carries over a little
+const SKELETON_BASE = PLOT_HEIGHT * 0.78;
+
 // Which days get an x-axis label: all of a week, fewer as the range widens,
 // and always today at the right edge
 function labelEvery(count: number): number {
@@ -205,22 +212,33 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
 
       <div className="todo-scroll flex-1 overflow-y-auto">
         <div className="todo-measure">
-          {/* The one filter, above everything it scopes */}
-          <div className="todo-stats-range" role="radiogroup" aria-label="Range">
-            {STATS_RANGES.map((option) => (
-              <button
-                key={option}
-                role="radio"
-                aria-checked={range === option}
-                onClick={() => {
-                  setActive(null);
-                  setRange(option);
-                }}
-                className="todo-stats-range-option"
-              >
-                {option} days
-              </button>
-            ))}
+          {/* The one filter, above everything it scopes, and beside it whether
+              its numbers are still on their way */}
+          <div className="todo-stats-toolbar">
+            <div className="todo-stats-range" role="radiogroup" aria-label="Range">
+              {STATS_RANGES.map((option) => (
+                <button
+                  key={option}
+                  role="radio"
+                  aria-checked={range === option}
+                  onClick={() => {
+                    setActive(null);
+                    setRange(option);
+                  }}
+                  className="todo-stats-range-option"
+                >
+                  {option} days
+                </button>
+              ))}
+            </div>
+            <p className="todo-stats-loading" role="status">
+              {loading && (
+                <>
+                  <span className="todo-stats-spinner" aria-hidden />
+                  Loading the last {range} days…
+                </>
+              )}
+            </p>
           </div>
 
           {error && (
@@ -233,15 +251,15 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
             <dl className="todo-stats-tiles">
               <div className="todo-stats-tile">
                 <dt>Started</dt>
-                <dd>{totals.started}</dd>
+                <dd>{data ? totals.started : "—"}</dd>
               </div>
               <div className="todo-stats-tile">
                 <dt>Done</dt>
-                <dd>{totals.done}</dd>
+                <dd>{data ? totals.done : "—"}</dd>
               </div>
               <div className="todo-stats-tile">
                 <dt>Carried over</dt>
-                <dd>{totals.carried}</dd>
+                <dd>{data ? totals.carried : "—"}</dd>
               </div>
               <div className="todo-stats-tile">
                 <dt>Follow-through</dt>
@@ -274,6 +292,47 @@ export default function TodoStats({ api, onPickDay, onClose }: TodoStatsProps) {
               onPointerLeave={() => setActive(null)}
               style={{ height: PLOT_HEIGHT + X_LABEL_BAND }}
             >
+              {/* Before the first answer: the frame and some columns, pulsing,
+                  where the chart will be. Only while it's on its way — after a
+                  failure the error says what happened. */}
+              {width > 0 && !data && loading && (
+                <svg
+                  width={width}
+                  height={PLOT_HEIGHT + X_LABEL_BAND}
+                  className="todo-stats-skeleton"
+                  aria-hidden
+                >
+                  <g className="todo-stats-axis">
+                    <line x1={AXIS_WIDTH} x2={width} y1={0.5} y2={0.5} />
+                    <line
+                      x1={AXIS_WIDTH}
+                      x2={width}
+                      y1={PLOT_HEIGHT - 0.5}
+                      y2={PLOT_HEIGHT - 0.5}
+                    />
+                  </g>
+                  <line
+                    className="todo-stats-baseline"
+                    x1={AXIS_WIDTH}
+                    x2={width}
+                    y1={SKELETON_BASE}
+                    y2={SKELETON_BASE}
+                  />
+                  {rows.map((row, i) => (
+                    <path
+                      key={row.date}
+                      className="todo-stats-skeleton-bar"
+                      d={barPath(
+                        AXIS_WIDTH + slot * i + (slot - barWidth) / 2,
+                        barWidth,
+                        SKELETON_BASE - BASELINE_GAP,
+                        SKELETON[i % SKELETON.length] * (SKELETON_BASE - BASELINE_GAP),
+                        true,
+                      )}
+                    />
+                  ))}
+                </svg>
+              )}
               {width > 0 && data && (
                 <svg
                   width={width}
